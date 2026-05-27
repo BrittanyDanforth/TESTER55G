@@ -166,32 +166,7 @@ class MinesPredictorApp:
             font=FONTS["label"],
         ).pack(side=tk.RIGHT)
 
-        spin_wrap = tk.Frame(
-            inner,
-            bg=COLORS["input_bg"],
-            highlightbackground=COLORS["border"],
-            highlightthickness=1,
-        )
-        spin_wrap.pack(fill=tk.X, pady=(0, 12))
-
-        self.mine_spinbox = tk.Spinbox(
-            spin_wrap,
-            from_=1,
-            to=24,
-            width=6,
-            textvariable=self.mine_count_var,
-            bg=COLORS["input_bg"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            buttonbackground=COLORS["panel_elevated"],
-            activebackground=COLORS["panel_elevated"],
-            relief=tk.FLAT,
-            font=FONTS["body"],
-            command=self._on_any_input,
-        )
-        self.mine_spinbox.pack(ipady=6, ipadx=4, padx=2, pady=2)
-        for sequence in ("<KeyRelease>", "<ButtonRelease-1>", "<FocusOut>"):
-            self.mine_spinbox.bind(sequence, self._on_any_input)
+        self._build_mine_stepper(inner)
 
         ttk.Button(
             inner,
@@ -207,6 +182,84 @@ class MinesPredictorApp:
             command=self._on_verify_hash,
         )
         self.verify_btn.pack(fill=tk.X)
+
+    def _build_mine_stepper(self, parent: tk.Frame) -> None:
+        wrap = tk.Frame(
+            parent,
+            bg=COLORS["input_bg"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        wrap.pack(fill=tk.X, pady=(0, 12))
+
+        row = tk.Frame(wrap, bg=COLORS["input_bg"])
+        row.pack(fill=tk.X, padx=4, pady=4)
+        row.columnconfigure(1, weight=1)
+
+        self.mine_minus_btn = ttk.Button(
+            row,
+            text="−",
+            style="Stepper.TButton",
+            command=lambda: self._step_mines(-1),
+        )
+        self.mine_minus_btn.grid(row=0, column=0, sticky="ns", padx=(4, 0))
+
+        center = tk.Frame(row, bg=COLORS["input_bg"])
+        center.grid(row=0, column=1, sticky="ew", padx=8)
+
+        self.mine_entry = tk.Entry(
+            center,
+            textvariable=self.mine_count_var,
+            width=4,
+            justify=tk.CENTER,
+            bg=COLORS["input_bg"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["accent"],
+            relief=tk.FLAT,
+            font=("Segoe UI", 20, "bold"),
+            disabledbackground=COLORS["input_bg"],
+            disabledforeground=COLORS["text"],
+        )
+        self.mine_entry.pack(ipady=4)
+        self.mine_entry.bind("<KeyRelease>", self._on_mine_entry_key)
+        self.mine_entry.bind("<Return>", lambda _e: self._run_detect(show_popup=True))
+
+        tk.Label(
+            center,
+            text="bombs",
+            bg=COLORS["input_bg"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack()
+
+        self.mine_plus_btn = ttk.Button(
+            row,
+            text="+",
+            style="Stepper.TButton",
+            command=lambda: self._step_mines(1),
+        )
+        self.mine_plus_btn.grid(row=0, column=2, sticky="ns", padx=(0, 4))
+
+    def _step_mines(self, delta: int) -> None:
+        try:
+            value = int(self.mine_count_var.get().strip())
+        except ValueError:
+            value = 3
+        value = max(1, min(24, value + delta))
+        self.mine_count_var.set(str(value))
+
+    def _on_mine_entry_key(self, _event=None) -> None:
+        raw = self.mine_count_var.get().strip()
+        if not raw:
+            return
+        if not raw.isdigit():
+            cleaned = "".join(ch for ch in raw if ch.isdigit())
+            self.mine_count_var.set(cleaned)
+            return
+        value = int(raw)
+        if value > 24:
+            self.mine_count_var.set("24")
+        self._on_any_input()
 
     def _field(
         self,
@@ -442,7 +495,14 @@ class MinesPredictorApp:
         fg = COLORS["text"] if enabled else COLORS["muted"]
         for entry in self._seed_entries:
             entry.configure(state=state, bg=bg, fg=fg)
-        self.mine_spinbox.configure(state=tk.NORMAL)
+        entry_state = tk.NORMAL if enabled else tk.DISABLED
+        self.mine_entry.configure(state=entry_state)
+        if enabled:
+            self.mine_minus_btn.state(["!disabled"])
+            self.mine_plus_btn.state(["!disabled"])
+        else:
+            self.mine_minus_btn.state(["disabled"])
+            self.mine_plus_btn.state(["disabled"])
         self.verify_btn.state(["!disabled"] if enabled else ["disabled"])
 
     def _read_server(self) -> str:
@@ -463,12 +523,6 @@ class MinesPredictorApp:
 
     def _read_mine_count_raw(self) -> str:
         self.root.update_idletasks()
-        try:
-            value = str(self.mine_spinbox.get()).strip()
-        except tk.TclError:
-            value = ""
-        if value:
-            return value
         return self.mine_count_var.get().strip()
 
     def _parse_mine_count(self) -> int:

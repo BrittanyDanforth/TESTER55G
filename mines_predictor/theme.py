@@ -118,4 +118,18 @@ def configure_styles(root: tk.Tk) -> ttk.Style:
     )
     style.map("Demo.TCheckbutton", background=[("active", COLORS["bg"])])
 
+    style.configure(
+        "Stepper.TButton",
+        font=("Segoe UI", 16),
+        padding=(0, 8),
+        width=3,
+        background=COLORS["panel_elevated"],
+        foreground=COLORS["text"],
+        borderwidth=0,
+    )
+    style.map(
+        "Stepper.TButton",
+        background=[("active", COLORS["border"]), ("pressed", COLORS["border_focus"])],
+    )
+
     return style
