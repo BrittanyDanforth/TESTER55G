@@ -1,4 +1,4 @@
-"""Mine count changes must refresh the grid (headless)."""
+"""Mine count changes alone must not refresh the grid — only Detect does."""
 
 import os
 import unittest
@@ -11,7 +11,7 @@ from mines_predictor.gui import MinesPredictorApp
 
 
 class MineCountRefreshTests(unittest.TestCase):
-    def test_demo_mine_count_changes_grid(self) -> None:
+    def test_mine_count_only_updates_after_detect(self) -> None:
         try:
             app = MinesPredictorApp()
         except tk.TclError as exc:
@@ -20,26 +20,24 @@ class MineCountRefreshTests(unittest.TestCase):
             raise
 
         try:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
-
             app.demo_mode.set(True)
             app._apply_demo_mode()
             app.root.update()
 
-            mines_three = self._grid_mine_tiles(app)
-            self.assertEqual(len(mines_three), 3)
+            self.assertEqual(self._grid_mine_tiles(app), [])
+
+            app._on_detect_click()
+            app.root.update()
+            self.assertEqual(len(self._grid_mine_tiles(app)), 3)
 
             app.mine_count_var.set("1")
             app.root.update_idletasks()
-            app._run_detect(show_popup=False, force=True)
-            app.root.update()
+            self.assertEqual(len(self._grid_mine_tiles(app)), 3)
 
-            mines_one = self._grid_mine_tiles(app)
-            self.assertEqual(len(mines_one), 1)
+            app._on_detect_click()
+            app.root.update()
+            self.assertEqual(len(self._grid_mine_tiles(app)), 1)
         finally:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
             app.root.destroy()
 
     @staticmethod

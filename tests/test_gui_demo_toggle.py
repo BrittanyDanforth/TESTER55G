@@ -20,9 +20,6 @@ class DemoToggleTests(unittest.TestCase):
             raise
 
         try:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
-
             app.demo_mode.set(True)
             app._apply_demo_mode()
             app.root.update()
@@ -33,10 +30,18 @@ class DemoToggleTests(unittest.TestCase):
 
             self.assertTrue(app.server_seed_var.get().strip())
             self.assertTrue(app.client_seed_var.get().strip())
+            self.assertEqual(self._grid_mine_tiles(app), [])
         finally:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
             app.root.destroy()
+
+    @staticmethod
+    def _grid_mine_tiles(app: MinesPredictorApp) -> list[int]:
+        tiles = []
+        for row in range(5):
+            for col in range(5):
+                if app._cell_labels[row][col].cget("text") == "💣":
+                    tiles.append(row * 5 + col)
+        return tiles
 
 
 if __name__ == "__main__":

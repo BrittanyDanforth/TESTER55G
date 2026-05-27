@@ -24,7 +24,6 @@ from mines_predictor.theme import (
 
 COLS = 5
 ROWS = 5
-MINE_AUTO_MS = 350
 
 
 class MinesPredictorApp:
@@ -40,8 +39,6 @@ class MinesPredictorApp:
 
         self.demo_mode = tk.BooleanVar(value=True)
         self._saved_live_seeds: dict[str, str] = {}
-        self._mine_auto_id: str | None = None
-        self._suppress_auto = False
         self._last_bundle_key: tuple[str, str, int, int, bool] | None = None
         self._last_rendered_mines: frozenset[int] | None = None
 
@@ -405,24 +402,8 @@ class MinesPredictorApp:
         self.result_safe.pack(anchor=tk.W, pady=4)
 
     def _on_detect_click(self, _event=None) -> None:
-        """Manual detect — always runs a full scan."""
-        self._cancel_mine_auto()
+        """Only way to run detection — button or Enter."""
         self._run_detect(show_popup=True, force=True)
-
-    def _cancel_mine_auto(self) -> None:
-        if self._mine_auto_id is not None:
-            self.root.after_cancel(self._mine_auto_id)
-            self._mine_auto_id = None
-
-    def _schedule_mine_auto(self) -> None:
-        if self._suppress_auto:
-            return
-        self._cancel_mine_auto()
-        self._mine_auto_id = self.root.after(MINE_AUTO_MS, self._mine_auto_detect)
-
-    def _mine_auto_detect(self) -> None:
-        self._mine_auto_id = None
-        self._run_detect(show_popup=False, force=True)
 
     def _step_mines(self, delta: int) -> None:
         try:
@@ -431,11 +412,8 @@ class MinesPredictorApp:
             value = 3
         value = max(1, min(24, value + delta))
         self._set_mine_count(value)
-        self._schedule_mine_auto()
 
     def _on_mine_count_edited(self, _event=None) -> None:
-        if self._suppress_auto:
-            return
         raw = self._read_mine_count_raw()
         if not raw:
             return
@@ -450,15 +428,12 @@ class MinesPredictorApp:
         if value < 1:
             return
         self._set_mine_count(value)
-        self._schedule_mine_auto()
 
     def _set_mine_count(self, value: int) -> None:
         text = str(max(1, min(24, value)))
         if self._read_mine_count_raw() == text:
             return
-        self._suppress_auto = True
         self.mine_count_var.set(text)
-        self._suppress_auto = False
 
     def _on_demo_toggle(self) -> None:
         self._apply_demo_mode()
@@ -472,7 +447,6 @@ class MinesPredictorApp:
         }
 
     def _apply_demo_mode(self) -> None:
-        self._cancel_mine_auto()
         self._last_bundle_key = None
         self._last_rendered_mines = None
 
@@ -482,13 +456,14 @@ class MinesPredictorApp:
             self._load_demo_seeds()
             self._set_seed_inputs_enabled(False)
             self.subtitle_label.configure(
-                text="Demo — change mine count or press Detect. Seeds are fixed."
+                text="Demo — fixed seeds. Set mine count, then press Detect mines."
             )
             self.demo_banner.configure(
                 text="Verified demo · 3 mines land on (4,4), (4,1), (2,1)"
             )
             self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
-            self._run_detect(show_popup=False, force=True)
+            self._show_waiting_state()
+            self._set_status("Press Detect mines to scan", COLORS["muted"])
             return
 
         self._set_seed_inputs_enabled(True)
@@ -498,30 +473,22 @@ class MinesPredictorApp:
             text="Paste seeds, set mine count, then press Detect mines."
         )
         self.demo_banner_frame.pack_forget()
-
-        if self._has_valid_live_seeds():
-            self._run_detect(show_popup=False, force=True)
-        else:
-            self._show_waiting_state()
+        self._show_waiting_state()
 
     def _has_valid_live_seeds(self) -> bool:
         return bool(self._read_server() and self._read_client())
 
     def _load_demo_seeds(self) -> None:
-        self._suppress_auto = True
         self.server_seed_var.set(OFFLINE_DEMO.server_seed)
         self.client_seed_var.set(OFFLINE_DEMO.client_seed)
         self.server_hash_var.set(OFFLINE_DEMO.server_hash)
         self.mine_count_var.set(str(OFFLINE_DEMO.mine_count))
-        self._suppress_auto = False
 
     def _restore_live_seeds(self) -> None:
-        self._suppress_auto = True
         self.server_seed_var.set(self._saved_live_seeds.get("server", ""))
         self.client_seed_var.set(self._saved_live_seeds.get("client", ""))
         self.server_hash_var.set(self._saved_live_seeds.get("hash", ""))
         self.mine_count_var.set(self._saved_live_seeds.get("mines", "3"))
-        self._suppress_auto = False
 
     def _set_seed_inputs_enabled(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -730,7 +697,6 @@ class MinesPredictorApp:
         self.result_safe.configure(text=f"Safe tiles: {len(result.safe_tiles)} of 25")
 
     def _on_close(self) -> None:
-        self._cancel_mine_auto()
         self.root.destroy()
 
     def run(self) -> None:

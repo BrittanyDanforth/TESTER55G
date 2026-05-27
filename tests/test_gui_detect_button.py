@@ -20,9 +20,6 @@ class DetectButtonTests(unittest.TestCase):
             raise
 
         try:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
-
             app.demo_mode.set(True)
             app._apply_demo_mode()
             app.root.update()
@@ -37,8 +34,6 @@ class DetectButtonTests(unittest.TestCase):
             self.assertEqual(app._last_bundle_key, first)
             self.assertEqual(len(self._grid_mine_tiles(app)), 3)
         finally:
-            if app._mine_auto_id is not None:
-                app.root.after_cancel(app._mine_auto_id)
             app.root.destroy()
 
     @staticmethod
