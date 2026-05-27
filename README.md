@@ -1,6 +1,6 @@
-# Stake Mines Detector (Python GUI)
+# Mines Detector (Python GUI)
 
-Detect **every mine** on a Stake-style 5×5 grid from your provably fair seeds.
+Detect mine positions on a **Stake-style** 5×5 provably fair grid. Works for **your own site** (same math as Stake) — no need to have stake.com open.
 
 ## Run
 
@@ -8,27 +8,21 @@ Detect **every mine** on a Stake-style 5×5 grid from your provably fair seeds.
 python3 main.py
 ```
 
-(`sudo apt install python3-tk` on Linux if needed)
+Linux: `sudo apt install python3-tk`
 
-## Use
+## Offline demo mode (top right)
 
-1. Paste **server seed** (unhashed, after you rotate on Stake)
-2. Paste **client seed**
-3. Set **mines on board** (1–24) — same as your game settings
-4. Click **Detect mines** (or press **Enter**)
+Turn **Offline demo mode** on to try detection instantly with **real verified seeds** (from Stake’s published provably fair test vectors). You should see **3 mines** at tiles **18, 15, 5**.
 
-The grid **refreshes every detect**. Change seeds or mine count and click again.
+Turn it **off** to paste seeds from **your site’s** fairness page.
 
-Optional: paste **server seed hash** and use **Verify server seed hash** only (does not block detection).
+## Your site (live mode)
 
-## Test seeds (copy/paste)
+1. Copy **unhashed server seed** + **client seed** from your game’s fairness settings  
+2. Set **mines on board** to match the game  
+3. Click **Detect mines**
 
-| Server seed | Client seed | Mines | Result |
-|-------------|-------------|-------|--------|
-| `server seed` | `client seed` | 1 | tile 18 |
-| `server seed` | `client seed` | 3 | tiles 18, 15, 5 |
-
-For these test seeds the tool uses **game round 1** internally (Stake bet history value). The GUI always uses round **0** for your own seeds unless you change the API.
+Uses **game round 0** for your seeds (first round with that pair). Same algorithm as Stake Originals Mines.
 
 ## Tests
 
@@ -36,8 +30,8 @@ For these test seeds the tool uses **game round 1** internally (Stake bet histor
 python3 -m unittest discover -s tests -v
 ```
 
-## Layout
+## Demo reference
 
-- `mines_predictor/provably_fair.py` — Stake RNG + mine math
-- `mines_predictor/detector.py` — detection API
-- `mines_predictor/gui.py` — desktop UI
+| Server seed | Client seed | Round | Mines | Result tiles |
+|-------------|-------------|-------|-------|----------------|
+| `server seed` | `client seed` | 1 | 3 | 18, 15, 5 |

@@ -5,6 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from mines_predictor.demo import OFFLINE_DEMO, run_demo_detection
 from mines_predictor.detector import MinesDetector, SeedBundle
 from mines_predictor.provably_fair import (
     PredictionResult,
@@ -24,6 +25,7 @@ COLORS = {
     "muted": "#8fa3b0",
     "accent": "#00e701",
     "danger": "#ff4d4d",
+    "demo": "#f7b731",
     "safe": "#1e3a2f",
     "safe_border": "#00e701",
     "mine": "#3d1515",
@@ -36,17 +38,27 @@ COLORS = {
 class MinesPredictorApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("Stake Mines Detector")
+        self.root.title("Mines Detector")
         self.root.configure(bg=COLORS["bg"])
-        self.root.minsize(680, 640)
+        self.root.minsize(700, 660)
 
         self._detector = MinesDetector()
         self._cell_labels: list[list[tk.Label]] = []
-        self._entry_widgets: list[tk.Entry] = []
+        self._seed_entries: list[tk.Entry] = []
+
+        self.demo_mode = tk.BooleanVar(value=True)
+        self._saved_live_seeds: dict[str, str] = {}
+
+        self.server_seed_var = tk.StringVar()
+        self.client_seed_var = tk.StringVar()
+        self.server_hash_var = tk.StringVar()
+        self.mine_count_var = tk.StringVar(value="3")
 
         self._build_style()
         self._build_layout()
         self.root.bind("<Return>", self._on_return_key)
+
+        self.root.after(100, self._apply_demo_mode)
 
     def _build_style(self) -> None:
         style = ttk.Style()
@@ -67,24 +79,56 @@ class MinesPredictorApp:
         style.configure("TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         style.configure("Bg.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
         style.configure("Accent.TButton", font=("Segoe UI", 11, "bold"))
+        style.configure(
+            "Demo.TCheckbutton",
+            background=COLORS["bg"],
+            foreground=COLORS["demo"],
+            font=("Segoe UI", 10, "bold"),
+        )
 
     def _build_layout(self) -> None:
-        header = ttk.Label(
-            self.root,
-            text="Mines Detector",
-            style="Bg.TLabel",
-            font=("Segoe UI", 14, "bold"),
-            foreground=COLORS["text"],
-            background=COLORS["bg"],
-        )
-        header.pack(pady=(12, 4))
+        top = tk.Frame(self.root, bg=COLORS["bg"])
+        top.pack(fill=tk.X, padx=16, pady=(10, 0))
 
-        subtitle = ttk.Label(
-            self.root,
-            text="Paste server + client seeds and mine count, then detect.",
-            style="Bg.TLabel",
+        self.title_label = tk.Label(
+            top,
+            text="Mines Detector",
+            bg=COLORS["bg"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 15, "bold"),
         )
-        subtitle.pack(pady=(0, 12))
+        self.title_label.pack(side=tk.LEFT)
+
+        self.demo_switch = ttk.Checkbutton(
+            top,
+            text="Offline demo mode",
+            variable=self.demo_mode,
+            command=self._on_demo_toggle,
+            style="Demo.TCheckbutton",
+        )
+        self.demo_switch.pack(side=tk.RIGHT)
+
+        self.subtitle_label = tk.Label(
+            self.root,
+            text="",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 10),
+            wraplength=640,
+            justify=tk.LEFT,
+        )
+        self.subtitle_label.pack(anchor=tk.W, padx=16, pady=(6, 4))
+
+        self.demo_banner = tk.Label(
+            self.root,
+            text="",
+            bg="#2a2208",
+            fg=COLORS["demo"],
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=6,
+        )
+        self.demo_banner.pack(fill=tk.X, padx=16, pady=(0, 8))
 
         body = ttk.Frame(self.root, style="TFrame")
         body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
@@ -100,19 +144,18 @@ class MinesPredictorApp:
         self._build_output_panel(left)
 
     def _build_seed_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Seeds", style="Panel.TLabelframe")
-        frame.pack(fill=tk.X, pady=(0, 10))
+        self.seed_frame = ttk.LabelFrame(parent, text="Seeds", style="Panel.TLabelframe")
+        self.seed_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.server_seed_var = tk.StringVar()
-        self.client_seed_var = tk.StringVar()
-        self.server_hash_var = tk.StringVar()
-        self.mine_count_var = tk.StringVar(value="3")
+        self._labeled_entry(
+            self.seed_frame, "Server seed (unhashed)", self.server_seed_var, 0
+        )
+        self._labeled_entry(self.seed_frame, "Client seed", self.client_seed_var, 1)
+        self._labeled_entry(
+            self.seed_frame, "Server seed hash (optional)", self.server_hash_var, 2
+        )
 
-        self._labeled_entry(frame, "Server seed (unhashed)", self.server_seed_var, 0)
-        self._labeled_entry(frame, "Client seed", self.client_seed_var, 1)
-        self._labeled_entry(frame, "Server seed hash (optional)", self.server_hash_var, 2)
-
-        mine_row = ttk.Frame(frame, style="TFrame")
+        mine_row = ttk.Frame(self.seed_frame, style="TFrame")
         mine_row.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=8)
         ttk.Label(mine_row, text="Mines on board (1–24)").pack(side=tk.LEFT)
         self.mine_spinbox = ttk.Spinbox(
@@ -124,24 +167,29 @@ class MinesPredictorApp:
         )
         self.mine_spinbox.pack(side=tk.RIGHT)
         self.mine_spinbox.bind("<Return>", self._on_return_key)
+        self.mine_spinbox.bind("<FocusOut>", self._on_mine_count_changed)
+        self.mine_spinbox.bind("<<Increment>>", self._on_mine_count_changed)
+        self.mine_spinbox.bind("<<Decrement>>", self._on_mine_count_changed)
 
-        btn_row = ttk.Frame(frame, style="TFrame")
+        btn_row = ttk.Frame(self.seed_frame, style="TFrame")
         btn_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 10))
 
-        ttk.Button(
+        self.detect_btn = ttk.Button(
             btn_row,
             text="Detect mines",
             style="Accent.TButton",
             command=self._on_predict,
-        ).pack(fill=tk.X, pady=(0, 6))
+        )
+        self.detect_btn.pack(fill=tk.X, pady=(0, 6))
 
-        ttk.Button(
+        self.verify_btn = ttk.Button(
             btn_row,
             text="Verify server seed hash",
             command=self._on_verify_hash,
-        ).pack(fill=tk.X)
+        )
+        self.verify_btn.pack(fill=tk.X)
 
-        frame.columnconfigure(1, weight=1)
+        self.seed_frame.columnconfigure(1, weight=1)
 
     def _labeled_entry(
         self,
@@ -164,7 +212,8 @@ class MinesPredictorApp:
         )
         entry.grid(row=row, column=1, sticky="ew", padx=10, pady=(8, 2), ipady=4)
         entry.bind("<Return>", self._on_return_key)
-        self._entry_widgets.append(entry)
+        entry.bind("<KeyRelease>", self._on_live_seed_edited)
+        self._seed_entries.append(entry)
 
     def _build_grid_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="5×5 detection grid", style="Panel.TLabelframe")
@@ -172,7 +221,7 @@ class MinesPredictorApp:
 
         self.status_label = tk.Label(
             frame,
-            text="Waiting for detection…",
+            text="Turn on demo mode or paste seeds, then detect.",
             bg=COLORS["panel"],
             fg=COLORS["muted"],
             font=("Segoe UI", 10),
@@ -221,7 +270,7 @@ class MinesPredictorApp:
 
         self.result_text = tk.Text(
             frame,
-            height=12,
+            height=11,
             wrap=tk.WORD,
             bg=COLORS["input_bg"],
             fg=COLORS["text"],
@@ -230,18 +279,95 @@ class MinesPredictorApp:
             font=("Consolas", 9),
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self._set_result_text(
-            "Enter server seed, client seed, and how many mines are on the board.\n"
-            "Click Detect mines (or press Enter).\n\n"
-            "The grid updates every time you detect — change seeds or mine count "
-            "and click again to see a new pattern.\n"
-        )
+
+    def _on_demo_toggle(self) -> None:
+        self._apply_demo_mode()
+
+    def _on_live_seed_edited(self, _event=None) -> None:
+        if self.demo_mode.get():
+            return
+        self._saved_live_seeds = {
+            "server": self.server_seed_var.get(),
+            "client": self.client_seed_var.get(),
+            "hash": self.server_hash_var.get(),
+            "mines": self.mine_count_var.get(),
+        }
+
+    def _apply_demo_mode(self) -> None:
+        if self.demo_mode.get():
+            if not self._saved_live_seeds and self.server_seed_var.get().strip():
+                self._on_live_seed_edited()
+            self._load_demo_seeds()
+            self._set_seed_inputs_enabled(False)
+            self.subtitle_label.configure(
+                text="Offline demo — real Stake-style math, no site needed. "
+                "Toggle off to paste seeds from your own site."
+            )
+            self.demo_banner.configure(
+                text="  DEMO: verified seeds · mines at tiles 18, 15, 5 (with 3 mines)  "
+            )
+            self.root.title("Mines Detector — Offline demo")
+        else:
+            self._set_seed_inputs_enabled(True)
+            self._restore_live_seeds()
+            self.subtitle_label.configure(
+                text="Paste server + client seeds from YOUR site (same provably fair "
+                "style as Stake). Set mine count to match the game, then detect."
+            )
+            self.demo_banner.configure(text="")
+            self.root.title("Mines Detector — Your site")
+
+        if self.demo_mode.get():
+            self._on_predict()
+        elif (
+            self.server_seed_var.get().strip()
+            and self.client_seed_var.get().strip()
+        ):
+            self._on_predict()
+        else:
+            self._reset_grid()
+            self.status_label.configure(
+                text="Paste seeds from your site, then click Detect mines.",
+                fg=COLORS["muted"],
+            )
+
+    def _load_demo_seeds(self) -> None:
+        self.server_seed_var.set(OFFLINE_DEMO.server_seed)
+        self.client_seed_var.set(OFFLINE_DEMO.client_seed)
+        self.server_hash_var.set(OFFLINE_DEMO.server_hash)
+        self.mine_count_var.set(str(OFFLINE_DEMO.mine_count))
+
+    def _restore_live_seeds(self) -> None:
+        if not self._saved_live_seeds:
+            self.server_seed_var.set("")
+            self.client_seed_var.set("")
+            self.server_hash_var.set("")
+            self.mine_count_var.set("3")
+            return
+        self.server_seed_var.set(self._saved_live_seeds.get("server", ""))
+        self.client_seed_var.set(self._saved_live_seeds.get("client", ""))
+        self.server_hash_var.set(self._saved_live_seeds.get("hash", ""))
+        self.mine_count_var.set(self._saved_live_seeds.get("mines", "3"))
+
+    def _set_seed_inputs_enabled(self, enabled: bool) -> None:
+        entry_state = tk.NORMAL if enabled else tk.DISABLED
+        for entry in self._seed_entries:
+            entry.configure(state=entry_state)
+        self.mine_spinbox.configure(state=tk.NORMAL)
+        self.verify_btn.configure(state=entry_state)
+
+    def _on_mine_count_changed(self, _event=None) -> None:
+        if self.demo_mode.get():
+            self.root.after(80, self._on_predict)
 
     def _on_return_key(self, _event=None) -> None:
         self._on_predict()
 
     def _parse_mine_count(self) -> int:
-        raw = self.mine_spinbox.get().strip()
+        self.root.update_idletasks()
+        raw = str(self.mine_spinbox.get()).strip()
+        if not raw:
+            raw = self.mine_count_var.get().strip()
         try:
             count = int(raw)
         except ValueError as exc:
@@ -251,9 +377,22 @@ class MinesPredictorApp:
         return count
 
     def _read_bundle(self) -> SeedBundle:
+        if self.demo_mode.get():
+            return SeedBundle(
+                server_seed=OFFLINE_DEMO.server_seed,
+                client_seed=OFFLINE_DEMO.client_seed,
+                mine_count=self._parse_mine_count(),
+                game_round=OFFLINE_DEMO.game_round,
+            )
+        server = self.server_seed_var.get().strip()
+        client = self.client_seed_var.get().strip()
+        if not server:
+            raise ValueError("Server seed is required (paste from your site fairness page)")
+        if not client:
+            raise ValueError("Client seed is required")
         return SeedBundle(
-            server_seed=self.server_seed_var.get().strip(),
-            client_seed=self.client_seed_var.get().strip(),
+            server_seed=server,
+            client_seed=client,
             mine_count=self._parse_mine_count(),
             game_round=0,
         )
@@ -271,6 +410,7 @@ class MinesPredictorApp:
         self.root.update_idletasks()
 
     def _on_predict(self, _event=None) -> None:
+        self.root.update_idletasks()
         self._reset_grid()
         try:
             bundle = self._read_bundle()
@@ -280,13 +420,26 @@ class MinesPredictorApp:
             messagebox.showerror("Detection failed", str(exc))
             return
 
+        demo_note = ""
+        if self.demo_mode.get():
+            ok, msg = run_demo_detection(bundle.mine_count)
+            demo_note = f"\n\n[{msg}]" if ok else f"\n\n[WARNING: {msg}]"
+            if not ok:
+                self.status_label.configure(text="Demo check failed", fg=COLORS["danger"])
+            else:
+                self.status_label.configure(
+                    text=f"Demo: {result.mine_count} mine(s) detected",
+                    fg=COLORS["demo"],
+                )
+        else:
+            self.status_label.configure(
+                text=f"Detected {result.mine_count} mine(s) on the grid",
+                fg=COLORS["accent"],
+            )
+
         self._render_grid(result)
-        self._write_result(result)
-        self.status_label.configure(
-            text=f"Detected {result.mine_count} mine(s) on the grid",
-            fg=COLORS["accent"],
-        )
-        self.root.update_idletasks()
+        self._write_result(result, demo_note)
+        self.root.update()
 
     def _on_verify_hash(self) -> None:
         server_seed = self.server_seed_var.get().strip()
@@ -294,7 +447,7 @@ class MinesPredictorApp:
         if not server_seed or not expected:
             messagebox.showwarning(
                 "Missing data",
-                "Enter the unhashed server seed and the hash from Fairness settings.",
+                "Enter the unhashed server seed and the hash from your site's fairness page.",
             )
             return
         computed = hash_server_seed(server_seed)
@@ -329,19 +482,18 @@ class MinesPredictorApp:
                         highlightthickness=2,
                     )
 
-    def _write_result(self, result: PredictionResult) -> None:
+    def _write_result(self, result: PredictionResult, extra: str = "") -> None:
+        mode = "OFFLINE DEMO" if self.demo_mode.get() else "YOUR SITE"
         text = (
-            "Detection complete\n"
+            f"Mode: {mode}\n"
             f"{'=' * 40}\n"
             f"Mines on board: {result.mine_count}\n"
             f"Mine tiles: {format_tile_list(result.mine_tiles)}\n"
             f"Indices: {list(result.mine_tiles_sorted)}\n\n"
-            f"Safe tiles ({len(result.safe_tiles)}): "
-            f"{format_tile_list(result.safe_tiles)}\n"
+            f"Safe ({len(result.safe_tiles)}): "
+            f"{format_tile_list(result.safe_tiles)}"
+            f"{extra}\n"
         )
-        self._set_result_text(text)
-
-    def _set_result_text(self, text: str) -> None:
         self.result_text.configure(state=tk.NORMAL)
         self.result_text.delete("1.0", tk.END)
         self.result_text.insert(tk.END, text)
