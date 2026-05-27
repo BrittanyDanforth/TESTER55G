@@ -17,52 +17,25 @@ from mines_predictor.provably_fair import (
 class SeedBundle:
     server_seed: str
     client_seed: str
-    bet_number: int
     mine_count: int
-    server_hash: str = ""
-
-
-@dataclass(frozen=True)
-class ScanResult:
-    bet_number: int
-    mines: tuple[int, ...]
+    """Round index for provably fair math (0 = first game with this seed pair)."""
+    game_round: int = 0
 
 
 class MinesDetector:
-    """Facade for seed validation, detection, and multi-bet scans."""
+    """Facade for seed validation and mine detection."""
 
     def detect(self, bundle: SeedBundle) -> PredictionResult:
-        if bundle.server_hash:
-            if not verify_server_seed_hash(bundle.server_seed, bundle.server_hash):
-                raise ValueError(
-                    "Server seed does not match the hash from fairness settings"
-                )
         return predict_mines(
             bundle.server_seed,
             bundle.client_seed,
-            bundle.bet_number,
+            bundle.game_round,
             bundle.mine_count,
         )
 
-    def scan_next_bets(
-        self,
-        bundle: SeedBundle,
-        *,
-        count: int = 5,
-    ) -> list[ScanResult]:
-        results: list[ScanResult] = []
-        for offset in range(count):
-            bet = bundle.bet_number + offset
-            prediction = predict_mines(
-                bundle.server_seed,
-                bundle.client_seed,
-                bet,
-                bundle.mine_count,
-            )
-            results.append(
-                ScanResult(bet_number=bet, mines=prediction.mine_tiles)
-            )
-        return results
+    @staticmethod
+    def verify_hash(server_seed: str, expected_hash: str) -> bool:
+        return verify_server_seed_hash(server_seed, expected_hash)
 
     @staticmethod
     def compute_server_hash(server_seed: str) -> str:

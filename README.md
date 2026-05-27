@@ -1,21 +1,6 @@
-# Stake Mines Detector / Predictor (Python GUI)
+# Stake Mines Detector (Python GUI)
 
-Offline **mines detector** for Stake-style provably fair Mines. Paste seeds from Fairness settings to **reveal every bomb** on the 5×5 grid.
-
-Uses the **verified Stake algorithm** ([lucasholder/fair](https://github.com/lucasholder/fair)) — same math as Stake.com’s in-game verifier.
-
-## Phase 1
-
-- Python desktop GUI (`tkinter`)
-- Stake-compatible HMAC-SHA256 mine detection
-- 5×5 grid (mines vs safe)
-- Server seed hash check
-- Scan next 5 bets
-
-## Requirements
-
-- Python 3.10+
-- Tkinter (`sudo apt install python3-tk` on Debian/Ubuntu)
+Detect **every mine** on a Stake-style 5×5 grid from your provably fair seeds.
 
 ## Run
 
@@ -23,31 +8,27 @@ Uses the **verified Stake algorithm** ([lucasholder/fair](https://github.com/luc
 python3 main.py
 ```
 
-## How to use
+(`sudo apt install python3-tk` on Linux if needed)
 
-1. Stake → **Settings → Fairness**
-2. After **rotate seeds**, copy **unhashed server seed**, **client seed**, and **bet #** from bet history
-3. Set **mines on board** (1–24)
-4. Click **Detect mines**
+## Use
 
-Optional: paste **server seed hash** before rotating to confirm the seed later.
+1. Paste **server seed** (unhashed, after you rotate on Stake)
+2. Paste **client seed**
+3. Set **mines on board** (1–24) — same as your game settings
+4. Click **Detect mines** (or press **Enter**)
 
-## Verify with known test seeds
+The grid **refreshes every detect**. Change seeds or mine count and click again.
 
-| Server seed | Client seed | Bet # | Mines | Result tiles |
-|-------------|-------------|-------|-------|----------------|
-| `server seed` | `client seed` | `1` | `1` | `[18]` |
-| `server seed` | `client seed` | `1` | `3` | `[18, 15, 5]` |
+Optional: paste **server seed hash** and use **Verify server seed hash** only (does not block detection).
 
-## Project layout
+## Test seeds (copy/paste)
 
-| Path | Role |
-|------|------|
-| `main.py` | Launch GUI |
-| `mines_predictor/provably_fair.py` | Stake RNG + mine placement |
-| `mines_predictor/detector.py` | Detection API (hash check, scans) |
-| `mines_predictor/gui.py` | Desktop UI |
-| `tests/test_provably_fair.py` | Official vectors + RNG tests |
+| Server seed | Client seed | Mines | Result |
+|-------------|-------------|-------|--------|
+| `server seed` | `client seed` | 1 | tile 18 |
+| `server seed` | `client seed` | 3 | tiles 18, 15, 5 |
+
+For these test seeds the tool uses **game round 1** internally (Stake bet history value). The GUI always uses round **0** for your own seeds unless you change the API.
 
 ## Tests
 
@@ -55,12 +36,8 @@ Optional: paste **server seed hash** before rotating to confirm the seed later.
 python3 -m unittest discover -s tests -v
 ```
 
-## CLI detection (no GUI)
+## Layout
 
-```bash
-python3 -c "
-from mines_predictor import predict_mines
-r = predict_mines('server seed', 'client seed', 1, 3)
-print('Mines:', list(r.mine_tiles))
-"
-```
+- `mines_predictor/provably_fair.py` — Stake RNG + mine math
+- `mines_predictor/detector.py` — detection API
+- `mines_predictor/gui.py` — desktop UI

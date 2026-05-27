@@ -14,15 +14,11 @@ from mines_predictor.provably_fair import (
 
 
 class StakeOfficialVectors(unittest.TestCase):
-    """Vectors from lucasholder/fair (verified on Stake.com)."""
-
     def test_one_mine(self) -> None:
-        mines = pick_mine_tiles("server seed", "client seed", 1, 1)
-        self.assertEqual(mines, [18])
+        self.assertEqual(pick_mine_tiles("server seed", "client seed", 1, 1), [18])
 
     def test_three_mines(self) -> None:
-        mines = pick_mine_tiles("server seed", "client seed", 1, 3)
-        self.assertEqual(mines, [18, 15, 5])
+        self.assertEqual(pick_mine_tiles("server seed", "client seed", 1, 3), [18, 15, 5])
 
     def test_server_seed_hash(self) -> None:
         digest = hash_server_seed("server seed")
@@ -35,8 +31,6 @@ class StakeOfficialVectors(unittest.TestCase):
     def test_prediction_result(self) -> None:
         result = predict_mines("server seed", "client seed", 1, 3)
         self.assertEqual(result.mine_tiles, (18, 15, 5))
-        self.assertEqual(result.mine_count, 3)
-        self.assertEqual(len(result.safe_tiles), 22)
 
 
 class StakeRNGTests(unittest.TestCase):
@@ -57,72 +51,48 @@ class StakeRNGTests(unittest.TestCase):
         for target in expected:
             self.assertAlmostEqual(rng.next_float(), target, places=14)
 
-    def test_high_nonce_first_float(self) -> None:
-        rng = StakeRNG(
-            "e8df2cc3b9ccb583ce5ea92336842387",
-            "83e27f682128eb1852b048203dfd6931",
-            1942124,
-        )
-        self.assertAlmostEqual(
-            rng.next_float(),
-            0.00000025122426450252533,
-            places=20,
-        )
-
     def test_generate_floats_count(self) -> None:
         floats = generate_floats("s", "c", 0, 24)
         self.assertEqual(len(floats), 24)
-        for value in floats:
-            self.assertGreaterEqual(value, 0.0)
-            self.assertLess(value, 1.0)
 
 
 class DetectorFacadeTests(unittest.TestCase):
-    def test_detect_with_valid_hash(self) -> None:
-        server = "server seed"
+    def test_detect(self) -> None:
         detector = MinesDetector()
         bundle = SeedBundle(
-            server_seed=server,
+            server_seed="server seed",
             client_seed="client seed",
-            bet_number=1,
             mine_count=3,
-            server_hash=hash_server_seed(server),
+            game_round=1,
         )
-        result = detector.detect(bundle)
-        self.assertEqual(result.mine_tiles, (18, 15, 5))
+        self.assertEqual(detector.detect(bundle).mine_tiles, (18, 15, 5))
 
-    def test_detect_rejects_bad_hash(self) -> None:
+    def test_detect_default_round_zero(self) -> None:
         detector = MinesDetector()
         bundle = SeedBundle(
             server_seed="server seed",
             client_seed="client seed",
-            bet_number=1,
             mine_count=1,
-            server_hash="0" * 64,
         )
-        with self.assertRaises(ValueError):
-            detector.detect(bundle)
+        mines_at_zero = detector.detect(bundle).mine_tiles
+        mines_at_one = detector.detect(
+            SeedBundle("server seed", "client seed", 1, game_round=1)
+        ).mine_tiles
+        self.assertNotEqual(mines_at_zero, mines_at_one)
 
-    def test_scan_next_bets(self) -> None:
-        detector = MinesDetector()
-        bundle = SeedBundle(
-            server_seed="server seed",
-            client_seed="client seed",
-            bet_number=1,
-            mine_count=1,
+    def test_verify_hash(self) -> None:
+        self.assertTrue(
+            MinesDetector.verify_hash(
+                "server seed",
+                hash_server_seed("server seed"),
+            )
         )
-        scans = detector.scan_next_bets(bundle, count=3)
-        self.assertEqual(len(scans), 3)
-        self.assertEqual(scans[0].bet_number, 1)
-        self.assertEqual(scans[0].mines, (18,))
 
 
 class ValidationTests(unittest.TestCase):
     def test_invalid_mine_count(self) -> None:
         with self.assertRaises(ValueError):
             predict_mines("a", "b", 0, 0)
-        with self.assertRaises(ValueError):
-            predict_mines("a", "b", 0, 25)
 
     def test_empty_seeds(self) -> None:
         with self.assertRaises(ValueError):

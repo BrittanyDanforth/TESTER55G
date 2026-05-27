@@ -38,14 +38,15 @@ class MinesPredictorApp:
         self.root = tk.Tk()
         self.root.title("Stake Mines Detector")
         self.root.configure(bg=COLORS["bg"])
-        self.root.minsize(720, 680)
+        self.root.minsize(680, 640)
 
         self._detector = MinesDetector()
-        self._cell_buttons: list[list[tk.Label]] = []
-        self._last_result: PredictionResult | None = None
+        self._cell_labels: list[list[tk.Label]] = []
+        self._entry_widgets: list[tk.Entry] = []
 
         self._build_style()
         self._build_layout()
+        self.root.bind("<Return>", self._on_return_key)
 
     def _build_style(self) -> None:
         style = ttk.Style()
@@ -64,17 +65,13 @@ class MinesPredictorApp:
             font=("Segoe UI", 10, "bold"),
         )
         style.configure("TLabel", background=COLORS["panel"], foreground=COLORS["text"])
-        style.configure(
-            "Bg.TLabel",
-            background=COLORS["bg"],
-            foreground=COLORS["muted"],
-        )
+        style.configure("Bg.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
         style.configure("Accent.TButton", font=("Segoe UI", 11, "bold"))
 
     def _build_layout(self) -> None:
         header = ttk.Label(
             self.root,
-            text="Mines Detector — Stake-style provably fair",
+            text="Mines Detector",
             style="Bg.TLabel",
             font=("Segoe UI", 14, "bold"),
             foreground=COLORS["text"],
@@ -84,7 +81,7 @@ class MinesPredictorApp:
 
         subtitle = ttk.Label(
             self.root,
-            text="Paste seeds from Fairness settings to reveal every bomb on the 5×5 grid.",
+            text="Paste server + client seeds and mine count, then detect.",
             style="Bg.TLabel",
         )
         subtitle.pack(pady=(0, 12))
@@ -103,33 +100,33 @@ class MinesPredictorApp:
         self._build_output_panel(left)
 
     def _build_seed_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Seeds & bet", style="Panel.TLabelframe")
+        frame = ttk.LabelFrame(parent, text="Seeds", style="Panel.TLabelframe")
         frame.pack(fill=tk.X, pady=(0, 10))
 
         self.server_seed_var = tk.StringVar()
         self.client_seed_var = tk.StringVar()
         self.server_hash_var = tk.StringVar()
-        self.bet_number_var = tk.StringVar(value="0")
-        self.mine_count_var = tk.IntVar(value=3)
+        self.mine_count_var = tk.StringVar(value="3")
 
         self._labeled_entry(frame, "Server seed (unhashed)", self.server_seed_var, 0)
         self._labeled_entry(frame, "Client seed", self.client_seed_var, 1)
         self._labeled_entry(frame, "Server seed hash (optional)", self.server_hash_var, 2)
-        self._labeled_entry(frame, "Bet #", self.bet_number_var, 3)
 
         mine_row = ttk.Frame(frame, style="TFrame")
-        mine_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=8)
-        ttk.Label(mine_row, text="Mines on board").pack(side=tk.LEFT)
-        ttk.Spinbox(
+        mine_row.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=8)
+        ttk.Label(mine_row, text="Mines on board (1–24)").pack(side=tk.LEFT)
+        self.mine_spinbox = ttk.Spinbox(
             mine_row,
             from_=1,
             to=24,
             textvariable=self.mine_count_var,
             width=6,
-        ).pack(side=tk.RIGHT)
+        )
+        self.mine_spinbox.pack(side=tk.RIGHT)
+        self.mine_spinbox.bind("<Return>", self._on_return_key)
 
         btn_row = ttk.Frame(frame, style="TFrame")
-        btn_row.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 10))
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 10))
 
         ttk.Button(
             btn_row,
@@ -142,12 +139,6 @@ class MinesPredictorApp:
             btn_row,
             text="Verify server seed hash",
             command=self._on_verify_hash,
-        ).pack(fill=tk.X, pady=(0, 6))
-
-        ttk.Button(
-            btn_row,
-            text="Scan next 5 bets",
-            command=self._on_scan_bets,
         ).pack(fill=tk.X)
 
         frame.columnconfigure(1, weight=1)
@@ -162,7 +153,7 @@ class MinesPredictorApp:
         ttk.Label(parent, text=label).grid(
             row=row, column=0, sticky="w", padx=10, pady=(8, 2)
         )
-        tk.Entry(
+        entry = tk.Entry(
             parent,
             textvariable=variable,
             bg=COLORS["input_bg"],
@@ -170,17 +161,29 @@ class MinesPredictorApp:
             insertbackground=COLORS["text"],
             relief=tk.FLAT,
             font=("Consolas", 9),
-        ).grid(row=row, column=1, sticky="ew", padx=10, pady=(8, 2), ipady=4)
+        )
+        entry.grid(row=row, column=1, sticky="ew", padx=10, pady=(8, 2), ipady=4)
+        entry.bind("<Return>", self._on_return_key)
+        self._entry_widgets.append(entry)
 
     def _build_grid_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="5×5 detection grid", style="Panel.TLabelframe")
         frame.pack(fill=tk.BOTH, expand=True)
 
+        self.status_label = tk.Label(
+            frame,
+            text="Waiting for detection…",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 10),
+        )
+        self.status_label.pack(pady=(10, 4))
+
         grid_wrap = tk.Frame(frame, bg=COLORS["panel"])
-        grid_wrap.pack(padx=16, pady=16)
+        grid_wrap.pack(padx=16, pady=8)
 
         for row in range(ROWS):
-            row_buttons: list[tk.Label] = []
+            row_labels: list[tk.Label] = []
             for col in range(COLS):
                 cell = tk.Label(
                     grid_wrap,
@@ -192,10 +195,11 @@ class MinesPredictorApp:
                     fg=COLORS["muted"],
                     relief=tk.RAISED,
                     bd=2,
+                    highlightthickness=0,
                 )
                 cell.grid(row=row, column=col, padx=3, pady=3)
-                row_buttons.append(cell)
-            self._cell_buttons.append(row_buttons)
+                row_labels.append(cell)
+            self._cell_labels.append(row_labels)
 
         legend = tk.Frame(frame, bg=COLORS["panel"])
         legend.pack(fill=tk.X, padx=12, pady=(0, 12))
@@ -217,7 +221,7 @@ class MinesPredictorApp:
 
         self.result_text = tk.Text(
             frame,
-            height=14,
+            height=12,
             wrap=tk.WORD,
             bg=COLORS["input_bg"],
             fg=COLORS["text"],
@@ -226,37 +230,63 @@ class MinesPredictorApp:
             font=("Consolas", 9),
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.result_text.insert(
-            tk.END,
-            "Paste server seed + client seed + bet number, then click Detect mines.\n\n"
-            "On live Stake the server seed is hidden until you rotate. After rotation, "
-            "or on your offline clone, detection is exact.\n",
+        self._set_result_text(
+            "Enter server seed, client seed, and how many mines are on the board.\n"
+            "Click Detect mines (or press Enter).\n\n"
+            "The grid updates every time you detect — change seeds or mine count "
+            "and click again to see a new pattern.\n"
         )
-        self.result_text.configure(state=tk.DISABLED)
+
+    def _on_return_key(self, _event=None) -> None:
+        self._on_predict()
+
+    def _parse_mine_count(self) -> int:
+        raw = self.mine_spinbox.get().strip()
+        try:
+            count = int(raw)
+        except ValueError as exc:
+            raise ValueError("Mines on board must be a whole number from 1 to 24") from exc
+        if count < 1 or count > 24:
+            raise ValueError("Mines on board must be from 1 to 24")
+        return count
 
     def _read_bundle(self) -> SeedBundle:
-        try:
-            bet_number = int(self.bet_number_var.get().strip())
-        except ValueError as exc:
-            raise ValueError("Bet # must be a whole number (0, 1, 2, …)") from exc
         return SeedBundle(
-            server_seed=self.server_seed_var.get(),
-            client_seed=self.client_seed_var.get(),
-            bet_number=bet_number,
-            mine_count=int(self.mine_count_var.get()),
-            server_hash=self.server_hash_var.get().strip(),
+            server_seed=self.server_seed_var.get().strip(),
+            client_seed=self.client_seed_var.get().strip(),
+            mine_count=self._parse_mine_count(),
+            game_round=0,
         )
 
-    def _on_predict(self) -> None:
+    def _reset_grid(self) -> None:
+        for row in range(ROWS):
+            for col in range(COLS):
+                self._cell_labels[row][col].configure(
+                    text="?",
+                    bg=COLORS["hidden"],
+                    fg=COLORS["muted"],
+                    highlightthickness=0,
+                )
+        self.status_label.configure(text="Detecting…", fg=COLORS["muted"])
+        self.root.update_idletasks()
+
+    def _on_predict(self, _event=None) -> None:
+        self._reset_grid()
         try:
-            result = self._detector.detect(self._read_bundle())
+            bundle = self._read_bundle()
+            result = self._detector.detect(bundle)
         except ValueError as exc:
+            self.status_label.configure(text="Detection failed", fg=COLORS["danger"])
             messagebox.showerror("Detection failed", str(exc))
             return
 
-        self._last_result = result
         self._render_grid(result)
         self._write_result(result)
+        self.status_label.configure(
+            text=f"Detected {result.mine_count} mine(s) on the grid",
+            fg=COLORS["accent"],
+        )
+        self.root.update_idletasks()
 
     def _on_verify_hash(self) -> None:
         server_seed = self.server_seed_var.get().strip()
@@ -276,28 +306,12 @@ class MinesPredictorApp:
                 f"Hash does not match.\n\nComputed:\n{computed}",
             )
 
-    def _on_scan_bets(self) -> None:
-        try:
-            scans = self._detector.scan_next_bets(self._read_bundle(), count=5)
-        except ValueError as exc:
-            messagebox.showerror("Scan failed", str(exc))
-            return
-
-        bundle = self._read_bundle()
-        lines = [f"Scan ({bundle.mine_count} mine(s) per bet):\n"]
-        for scan in scans:
-            lines.append(
-                f"Bet #{scan.bet_number}: mines at "
-                f"{MinesDetector.format_mines(scan.mines)}"
-            )
-        self._set_result_text("\n".join(lines))
-
     def _render_grid(self, result: PredictionResult) -> None:
         mines = set(result.mine_tiles)
         for row in range(ROWS):
             for col in range(COLS):
                 tile = row * COLS + col
-                cell = self._cell_buttons[row][col]
+                cell = self._cell_labels[row][col]
                 if tile in mines:
                     cell.configure(
                         text="💣",
@@ -317,14 +331,13 @@ class MinesPredictorApp:
 
     def _write_result(self, result: PredictionResult) -> None:
         text = (
-            f"Detection complete — bet #{result.bet_number}\n"
+            "Detection complete\n"
             f"{'=' * 40}\n"
-            f"Mines ({result.mine_count}): {format_tile_list(result.mine_tiles)}\n"
-            f"Placement order: {list(result.mine_tiles)}\n"
+            f"Mines on board: {result.mine_count}\n"
+            f"Mine tiles: {format_tile_list(result.mine_tiles)}\n"
+            f"Indices: {list(result.mine_tiles_sorted)}\n\n"
             f"Safe tiles ({len(result.safe_tiles)}): "
-            f"{format_tile_list(result.safe_tiles)}\n\n"
-            f"Tile indices (0–24, left→right, top→bottom):\n"
-            f"  {list(result.mine_tiles_sorted)}\n"
+            f"{format_tile_list(result.safe_tiles)}\n"
         )
         self._set_result_text(text)
 
