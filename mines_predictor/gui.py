@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -48,6 +50,12 @@ class MinesPredictorApp:
 
         self.demo_mode = tk.BooleanVar(value=True)
         self._saved_live_seeds: dict[str, str] = {}
+        self._detect_count = 0
+        self._last_input_key: str | None = None
+        self._last_mine_tiles: tuple[int, ...] | None = None
+        self._detect_after_id: str | None = None
+        self._busy = False
+        self._suppress_auto = False
 
         self.server_seed_var = tk.StringVar()
         self.client_seed_var = tk.StringVar()
@@ -213,6 +221,8 @@ class MinesPredictorApp:
         entry.grid(row=row, column=1, sticky="ew", padx=10, pady=(8, 2), ipady=4)
         entry.bind("<Return>", self._on_return_key)
         entry.bind("<KeyRelease>", self._on_live_seed_edited)
+        if row < 2:
+            variable.trace_add("write", lambda *_a: self._on_live_seed_edited())
         self._seed_entries.append(entry)
 
     def _build_grid_panel(self, parent: ttk.Frame) -> None:
@@ -279,6 +289,12 @@ class MinesPredictorApp:
             font=("Consolas", 9),
         )
         self.result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self._set_result_text(
+            "Paste server + client seeds and mine count, then Detect.\n\n"
+            "Same seeds + same mine count = same bombs every click (correct).\n"
+            "Change a seed or mine count to move the bombs.\n"
+            "Live mode auto-detects when you edit seeds.\n"
+        )
 
     def _on_demo_toggle(self) -> None:
         self._apply_demo_mode()
@@ -293,9 +309,35 @@ class MinesPredictorApp:
         }
 
     def _on_live_seed_edited(self, _event=None) -> None:
-        if self.demo_mode.get():
+        if self.demo_mode.get() or self._suppress_auto:
             return
         self._snapshot_fields_to_buffer()
+        if self._has_valid_live_seeds():
+            self._schedule_live_detect()
+
+    def _schedule_live_detect(self) -> None:
+        if self._detect_after_id is not None:
+            self.root.after_cancel(self._detect_after_id)
+        self._detect_after_id = self.root.after(
+            350, lambda: self._on_predict(show_errors=False)
+        )
+
+    def _get_entry_text(self, index: int, fallback: tk.StringVar) -> str:
+        if index < len(self._seed_entries):
+            try:
+                value = self._seed_entries[index].get().strip()
+                if value:
+                    return value
+            except tk.TclError:
+                pass
+        return fallback.get().strip()
+
+    def _bundle_input_key(self, bundle: SeedBundle) -> str:
+        raw = (
+            f"{bundle.server_seed}|{bundle.client_seed}|"
+            f"{bundle.mine_count}|{bundle.game_round}|{self.demo_mode.get()}"
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
     def _apply_demo_mode(self) -> None:
         if self.demo_mode.get():
@@ -334,20 +376,25 @@ class MinesPredictorApp:
 
     def _has_valid_live_seeds(self) -> bool:
         return bool(
-            self.server_seed_var.get().strip() and self.client_seed_var.get().strip()
+            self._get_entry_text(0, self.server_seed_var)
+            and self._get_entry_text(1, self.client_seed_var)
         )
 
     def _load_demo_seeds(self) -> None:
+        self._suppress_auto = True
         self.server_seed_var.set(OFFLINE_DEMO.server_seed)
         self.client_seed_var.set(OFFLINE_DEMO.client_seed)
         self.server_hash_var.set(OFFLINE_DEMO.server_hash)
         self.mine_count_var.set(str(OFFLINE_DEMO.mine_count))
+        self._suppress_auto = False
 
     def _restore_live_seeds(self) -> None:
+        self._suppress_auto = True
         self.server_seed_var.set(self._saved_live_seeds.get("server", ""))
         self.client_seed_var.set(self._saved_live_seeds.get("client", ""))
         self.server_hash_var.set(self._saved_live_seeds.get("hash", ""))
         self.mine_count_var.set(self._saved_live_seeds.get("mines", "3"))
+        self._suppress_auto = False
 
     def _show_live_ready_state(self) -> None:
         self._reset_grid()
@@ -397,15 +444,16 @@ class MinesPredictorApp:
         return count
 
     def _read_bundle(self) -> SeedBundle:
+        mine_count = self._parse_mine_count()
         if self.demo_mode.get():
             return SeedBundle(
                 server_seed=OFFLINE_DEMO.server_seed,
                 client_seed=OFFLINE_DEMO.client_seed,
-                mine_count=self._parse_mine_count(),
+                mine_count=mine_count,
                 game_round=OFFLINE_DEMO.game_round,
             )
-        server = self.server_seed_var.get().strip()
-        client = self.client_seed_var.get().strip()
+        server = self._get_entry_text(0, self.server_seed_var)
+        client = self._get_entry_text(1, self.client_seed_var)
         if not server:
             raise ValueError("Server seed is required (paste from your site fairness page)")
         if not client:
@@ -413,7 +461,7 @@ class MinesPredictorApp:
         return SeedBundle(
             server_seed=server,
             client_seed=client,
-            mine_count=self._parse_mine_count(),
+            mine_count=mine_count,
             game_round=0,
         )
 
@@ -430,49 +478,104 @@ class MinesPredictorApp:
         self.root.update_idletasks()
 
     def _on_predict(self, _event=None, *, show_errors: bool = True) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self.detect_btn.configure(state=tk.DISABLED)
         self.root.update_idletasks()
 
-        if not self.demo_mode.get() and not self._has_valid_live_seeds():
-            self._show_live_ready_state()
-            if show_errors:
-                messagebox.showinfo(
-                    "Seeds needed",
-                    "Paste your server seed and client seed from your site's "
-                    "fairness page, then click Detect mines.",
-                )
-            return
-
-        self._reset_grid()
         try:
+            if not self.demo_mode.get() and not self._has_valid_live_seeds():
+                self._show_live_ready_state()
+                if show_errors:
+                    messagebox.showinfo(
+                        "Seeds needed",
+                        "Paste your server seed and client seed from your site's "
+                        "fairness page, then click Detect mines.",
+                    )
+                return
+
+            self._reset_grid()
+            self.root.update()
+
             bundle = self._read_bundle()
+            input_key = self._bundle_input_key(bundle)
+            same_inputs = input_key == self._last_input_key
+
             result = self._detector.detect(bundle)
+            self._detect_count += 1
+
+            demo_note = ""
+            if self.demo_mode.get():
+                ok, msg = run_demo_detection(bundle.mine_count)
+                demo_note = f"\n\n[{msg}]" if ok else f"\n\n[WARNING: {msg}]"
+            else:
+                ok = True
+
+            pattern_note = self._pattern_change_note(result, same_inputs, input_key)
+            self._flash_then_render(result)
+
+            if self.demo_mode.get() and not ok:
+                self.status_label.configure(text="Demo check failed", fg=COLORS["danger"])
+            elif same_inputs:
+                self.status_label.configure(
+                    text=(
+                        f"Run #{self._detect_count} — same seeds, same "
+                        f"{result.mine_count} mine(s) (expected)"
+                    ),
+                    fg=COLORS["demo"] if self.demo_mode.get() else COLORS["muted"],
+                )
+            else:
+                self.status_label.configure(
+                    text=f"Run #{self._detect_count} — new pattern detected",
+                    fg=COLORS["accent"],
+                )
+
+            self._write_result(result, demo_note + pattern_note)
+            self._last_input_key = input_key
+            self._last_mine_tiles = result.mine_tiles
         except ValueError as exc:
             self.status_label.configure(text="Detection failed", fg=COLORS["danger"])
             if show_errors:
                 messagebox.showerror("Detection failed", str(exc))
             else:
                 self._set_result_text(f"Could not detect:\n{exc}\n")
-            return
+        finally:
+            self._busy = False
+            self.detect_btn.configure(state=tk.NORMAL)
+            self.root.update_idletasks()
 
-        demo_note = ""
-        if self.demo_mode.get():
-            ok, msg = run_demo_detection(bundle.mine_count)
-            demo_note = f"\n\n[{msg}]" if ok else f"\n\n[WARNING: {msg}]"
-            if not ok:
-                self.status_label.configure(text="Demo check failed", fg=COLORS["danger"])
-            else:
-                self.status_label.configure(
-                    text=f"Demo: {result.mine_count} mine(s) detected",
-                    fg=COLORS["demo"],
-                )
-        else:
-            self.status_label.configure(
-                text=f"Detected {result.mine_count} mine(s) on the grid",
-                fg=COLORS["accent"],
+    def _pattern_change_note(
+        self,
+        result: PredictionResult,
+        same_inputs: bool,
+        input_key: str,
+    ) -> str:
+        lines = [
+            f"\nDetection run #{self._detect_count} at {time.strftime('%H:%M:%S')}",
+            f"Input id: {input_key}",
+        ]
+        if same_inputs:
+            lines.append(
+                "\nSame server + client + mine count → same bomb spots every time.\n"
+                "That is correct (math is locked to your seeds).\n"
+                "Change a seed or mine count to move the bombs."
             )
+        elif (
+            self._last_mine_tiles is not None
+            and self._last_mine_tiles != result.mine_tiles
+        ):
+            lines.append(
+                f"\nPattern changed: was {list(self._last_mine_tiles)} → "
+                f"now {list(result.mine_tiles)}"
+            )
+        return "\n".join(lines)
 
+    def _flash_then_render(self, result: PredictionResult) -> None:
+        """Brief ? flash so each click visibly refreshes before showing mines."""
+        self._reset_grid()
+        self.root.update()
         self._render_grid(result)
-        self._write_result(result, demo_note)
         self.root.update()
 
     def _on_verify_hash(self) -> None:
@@ -516,9 +619,15 @@ class MinesPredictorApp:
                         highlightthickness=2,
                     )
 
+    def _set_result_text(self, text: str) -> None:
+        self.result_text.configure(state=tk.NORMAL)
+        self.result_text.delete("1.0", tk.END)
+        self.result_text.insert(tk.END, text)
+        self.result_text.configure(state=tk.DISABLED)
+
     def _write_result(self, result: PredictionResult, extra: str = "") -> None:
         mode = "OFFLINE DEMO" if self.demo_mode.get() else "YOUR SITE"
-        text = (
+        self._set_result_text(
             f"Mode: {mode}\n"
             f"{'=' * 40}\n"
             f"Mines on board: {result.mine_count}\n"
@@ -528,10 +637,6 @@ class MinesPredictorApp:
             f"{format_tile_list(result.safe_tiles)}"
             f"{extra}\n"
         )
-        self.result_text.configure(state=tk.NORMAL)
-        self.result_text.delete("1.0", tk.END)
-        self.result_text.insert(tk.END, text)
-        self.result_text.configure(state=tk.DISABLED)
 
     def run(self) -> None:
         self.root.mainloop()
