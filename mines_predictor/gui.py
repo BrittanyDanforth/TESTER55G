@@ -9,6 +9,7 @@ from mines_predictor.demo import OFFLINE_DEMO, run_demo_detection
 from mines_predictor.detector import MinesDetector, SeedBundle
 from mines_predictor.provably_fair import (
     PredictionResult,
+    format_squares,
     format_tile_list,
     hash_server_seed,
 )
@@ -29,7 +30,7 @@ ROWS = 5
 class MinesPredictorApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("Mines Detector")
+        self.root.title("Mines Verifier")
         self.root.configure(bg=COLORS["bg"])
         self.root.minsize(820, 720)
 
@@ -46,6 +47,7 @@ class MinesPredictorApp:
         self.client_seed_var = tk.StringVar()
         self.server_hash_var = tk.StringVar()
         self.mine_count_var = tk.StringVar(value="3")
+        self.game_round_var = tk.StringVar(value="1")
 
         configure_styles(self.root)
         self._build_layout()
@@ -81,7 +83,7 @@ class MinesPredictorApp:
 
         tk.Label(
             title_block,
-            text="Mines Detector",
+            text="Mines Verifier",
             bg=COLORS["bg"],
             fg=COLORS["text"],
             font=FONTS["title"],
@@ -133,7 +135,7 @@ class MinesPredictorApp:
         self.demo_banner.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     def _build_seed_panel(self, parent: tk.Frame) -> None:
-        card = ttk.LabelFrame(parent, text="  Seeds & settings", style="Card.TLabelframe")
+        card = ttk.LabelFrame(parent, text="  Provably fair", style="Card.TLabelframe")
         card.pack(fill=tk.X, pady=(0, 12))
 
         inner = tk.Frame(card, bg=COLORS["panel"])
@@ -161,10 +163,21 @@ class MinesPredictorApp:
         ).pack(side=tk.RIGHT)
 
         self._build_mine_stepper(inner)
+        self._build_bet_stepper(inner)
+
+        tk.Label(
+            inner,
+            text="Same math as lucasholder/fair and Stake’s verify modal",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+            wraplength=LEFT_PANEL_WIDTH - 48,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 10))
 
         self.detect_btn = ttk.Button(
             inner,
-            text="Detect mines",
+            text="Verify mines",
             style="Primary.TButton",
             command=self._on_detect_click,
         )
@@ -234,6 +247,67 @@ class MinesPredictorApp:
             command=lambda: self._step_mines(1),
         )
         self.mine_plus_btn.grid(row=0, column=2, sticky="ns", padx=(0, 4))
+
+    def _build_bet_stepper(self, parent: tk.Frame) -> None:
+        row = tk.Frame(parent, bg=COLORS["panel"])
+        row.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            row,
+            text="Bet # (nonce)",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            row,
+            text="fair CLI: 3rd argument",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(side=tk.RIGHT)
+
+        wrap = tk.Frame(
+            parent,
+            bg=COLORS["input_bg"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        wrap.pack(fill=tk.X, pady=(0, 12))
+
+        inner = tk.Frame(wrap, bg=COLORS["input_bg"])
+        inner.pack(fill=tk.X, padx=4, pady=4)
+
+        self.bet_minus_btn = ttk.Button(
+            inner,
+            text="−",
+            style="Stepper.TButton",
+            command=lambda: self._step_bet(-1),
+        )
+        self.bet_minus_btn.pack(side=tk.LEFT, padx=(4, 0))
+
+        self.bet_entry = tk.Entry(
+            inner,
+            textvariable=self.game_round_var,
+            width=6,
+            justify=tk.CENTER,
+            bg=COLORS["input_bg"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["accent"],
+            relief=tk.FLAT,
+            font=("Segoe UI", 14, "bold"),
+            disabledbackground=COLORS["input_bg"],
+            disabledforeground=COLORS["muted"],
+        )
+        self.bet_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=8, ipady=4)
+        self.bet_entry.bind("<Return>", self._on_detect_click)
+
+        self.bet_plus_btn = ttk.Button(
+            inner,
+            text="+",
+            style="Stepper.TButton",
+            command=lambda: self._step_bet(1),
+        )
+        self.bet_plus_btn.pack(side=tk.RIGHT, padx=(0, 4))
 
     def _field(
         self,
@@ -381,7 +455,7 @@ class MinesPredictorApp:
 
         self.result_bombs = tk.Label(
             inner,
-            text="Tap Detect to scan the board",
+            text="Press Verify mines to reproduce the board",
             bg=COLORS["panel"],
             fg=COLORS["text"],
             font=FONTS["body"],
@@ -401,8 +475,19 @@ class MinesPredictorApp:
         )
         self.result_safe.pack(anchor=tk.W, pady=4)
 
+        self.result_hash = tk.Label(
+            inner,
+            text="",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["mono"],
+            wraplength=LEFT_PANEL_WIDTH - 48,
+            justify=tk.LEFT,
+        )
+        self.result_hash.pack(anchor=tk.W, pady=(8, 0))
+
     def _on_detect_click(self, _event=None) -> None:
-        """Only way to run detection — button or Enter."""
+        """Only way to run verification — button or Enter."""
         self._run_detect(show_popup=True, force=True)
 
     def _step_mines(self, delta: int) -> None:
@@ -412,6 +497,41 @@ class MinesPredictorApp:
             value = 3
         value = max(1, min(24, value + delta))
         self._set_mine_count(value)
+
+    def _step_bet(self, delta: int) -> None:
+        try:
+            value = int(self._read_bet_raw())
+        except ValueError:
+            value = 0
+        self._set_bet_number(max(0, value + delta))
+
+    def _read_bet_raw(self) -> str:
+        try:
+            raw = self.bet_entry.get().strip()
+            if raw:
+                return raw
+        except tk.TclError:
+            pass
+        return self.game_round_var.get().strip()
+
+    def _set_bet_number(self, value: int) -> None:
+        text = str(max(0, value))
+        if self._read_bet_raw() == text:
+            return
+        self.game_round_var.set(text)
+
+    def _parse_game_round(self) -> int:
+        raw = self._read_bet_raw()
+        if not raw:
+            raise ValueError("Enter bet # / nonce (0 for first bet with this seed pair)")
+        try:
+            bet = int(raw)
+        except ValueError as exc:
+            raise ValueError("Bet # must be a whole number (0, 1, 2, …)") from exc
+        if bet < 0:
+            raise ValueError("Bet # cannot be negative")
+        self._set_bet_number(bet)
+        return bet
 
     def _on_mine_count_edited(self, _event=None) -> None:
         raw = self._read_mine_count_raw()
@@ -444,6 +564,7 @@ class MinesPredictorApp:
             "client": self._read_client(),
             "hash": self.server_hash_var.get().strip(),
             "mines": self._read_mine_count_raw(),
+            "bet": self._read_bet_raw(),
         }
 
     def _apply_demo_mode(self) -> None:
@@ -456,21 +577,21 @@ class MinesPredictorApp:
             self._load_demo_seeds()
             self._set_seed_inputs_enabled(False)
             self.subtitle_label.configure(
-                text="Demo — fixed seeds. Set mine count, then press Detect mines."
+                text="Stake test seeds (lucasholder/fair). Bet #1 · press Verify mines."
             )
             self.demo_banner.configure(
-                text="Verified demo · 3 mines land on (4,4), (4,1), (2,1)"
+                text="fair mines \"client seed\" \"server seed\" 1 → Squares: [18, 15, 5]"
             )
             self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
             self._show_waiting_state()
-            self._set_status("Press Detect mines to scan", COLORS["muted"])
+            self._set_status("Press Verify mines", COLORS["muted"])
             return
 
         self._set_seed_inputs_enabled(True)
         if self._saved_live_seeds.get("server") or self._saved_live_seeds.get("client"):
             self._restore_live_seeds()
         self.subtitle_label.configure(
-            text="Paste seeds, set mine count, then press Detect mines."
+            text="Paste seeds, mines, and bet # — then press Verify mines."
         )
         self.demo_banner_frame.pack_forget()
         self._show_waiting_state()
@@ -483,12 +604,14 @@ class MinesPredictorApp:
         self.client_seed_var.set(OFFLINE_DEMO.client_seed)
         self.server_hash_var.set(OFFLINE_DEMO.server_hash)
         self.mine_count_var.set(str(OFFLINE_DEMO.mine_count))
+        self.game_round_var.set(str(OFFLINE_DEMO.game_round))
 
     def _restore_live_seeds(self) -> None:
         self.server_seed_var.set(self._saved_live_seeds.get("server", ""))
         self.client_seed_var.set(self._saved_live_seeds.get("client", ""))
         self.server_hash_var.set(self._saved_live_seeds.get("hash", ""))
         self.mine_count_var.set(self._saved_live_seeds.get("mines", "3"))
+        self.game_round_var.set(self._saved_live_seeds.get("bet", "0"))
 
     def _set_seed_inputs_enabled(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -497,14 +620,20 @@ class MinesPredictorApp:
         for entry in self._seed_entries:
             entry.configure(state=state, bg=bg, fg=fg)
         self.mine_entry.configure(state=tk.NORMAL)
+        bet_state = tk.NORMAL if enabled else tk.DISABLED
+        self.bet_entry.configure(state=bet_state)
         if enabled:
             self.mine_minus_btn.state(["!disabled"])
             self.mine_plus_btn.state(["!disabled"])
+            self.bet_minus_btn.state(["!disabled"])
+            self.bet_plus_btn.state(["!disabled"])
             self.detect_btn.state(["!disabled"])
             self.verify_btn.state(["!disabled"])
         else:
             self.mine_minus_btn.state(["!disabled"])
             self.mine_plus_btn.state(["!disabled"])
+            self.bet_minus_btn.state(["disabled"])
+            self.bet_plus_btn.state(["disabled"])
             self.detect_btn.state(["!disabled"])
             self.verify_btn.state(["disabled"])
 
@@ -549,6 +678,7 @@ class MinesPredictorApp:
 
     def _read_bundle(self) -> SeedBundle:
         mine_count = self._parse_mine_count()
+        game_round = self._parse_game_round()
         if self.demo_mode.get():
             return SeedBundle(
                 server_seed=OFFLINE_DEMO.server_seed,
@@ -566,15 +696,16 @@ class MinesPredictorApp:
             server_seed=server,
             client_seed=client,
             mine_count=mine_count,
-            game_round=0,
+            game_round=game_round,
         )
 
     def _show_waiting_state(self) -> None:
         self._reset_grid()
-        self._set_status("Add your seeds, then press Detect", COLORS["muted"])
+        self._set_status("Paste seeds, then press Verify mines", COLORS["muted"])
         self.stat_mines.configure(text="—", fg=COLORS["muted"])
         self.result_bombs.configure(text="Paste server + client seed")
         self.result_safe.configure(text="")
+        self.result_hash.configure(text="")
 
     def _set_status(self, text: str, color: str) -> None:
         self.status_label.configure(text=text, fg=color)
@@ -600,7 +731,7 @@ class MinesPredictorApp:
                 if show_popup:
                     messagebox.showinfo(
                         "Seeds needed",
-                        "Paste your server seed and client seed, then press Detect mines.",
+                        "Paste your server seed and client seed, then press Verify mines.",
                     )
                 else:
                     self._show_waiting_state()
@@ -611,7 +742,7 @@ class MinesPredictorApp:
             except ValueError as exc:
                 self._set_status(str(exc), COLORS["danger"])
                 if show_popup:
-                    messagebox.showerror("Cannot detect", str(exc))
+                    messagebox.showerror("Cannot verify", str(exc))
                 return
 
             bundle_key = self._bundle_key(bundle)
@@ -619,21 +750,21 @@ class MinesPredictorApp:
                 self._set_status("Board already matches these settings", COLORS["muted"])
                 return
 
-            self._set_status("Scanning board…", COLORS["text_secondary"])
+            self._set_status("Verifying board…", COLORS["text_secondary"])
 
             result = self._detector.detect(bundle)
             self._render_grid(result, force=True)
-            self._write_result(result)
+            self._write_result(result, server_seed=bundle.server_seed)
             self._last_bundle_key = bundle_key
 
             if self.demo_mode.get():
                 ok, _ = run_demo_detection(bundle.mine_count)
                 color = COLORS["demo"] if ok else COLORS["danger"]
-                label = "Detection complete"
+                label = "Verified (matches fair CLI)"
             else:
                 ok = True
                 color = COLORS["accent"]
-                label = "Detection complete"
+                label = "Verified"
 
             self._set_status(f"{label} · {result.mine_count} bombs", color)
         finally:
@@ -690,11 +821,18 @@ class MinesPredictorApp:
                         highlightthickness=2,
                     )
 
-    def _write_result(self, result: PredictionResult) -> None:
+    def _write_result(self, result: PredictionResult, *, server_seed: str) -> None:
         bombs = format_tile_list(result.mine_tiles)
+        squares = format_squares(result.mine_tiles)
+        seed_hash = hash_server_seed(server_seed)
         self.stat_mines.configure(text=str(result.mine_count), fg=COLORS["accent"])
-        self.result_bombs.configure(text=f"Bomb positions:\n{bombs}")
-        self.result_safe.configure(text=f"Safe tiles: {len(result.safe_tiles)} of 25")
+        self.result_bombs.configure(
+            text=f"{squares}\n\nBomb positions:\n{bombs}"
+        )
+        self.result_safe.configure(
+            text=f"Safe tiles: {len(result.safe_tiles)} of 25 · bet #{result.bet_number}"
+        )
+        self.result_hash.configure(text=f"Hashed server seed:\n{seed_hash}")
 
     def _on_close(self) -> None:
         self.root.destroy()

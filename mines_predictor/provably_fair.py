@@ -221,3 +221,8 @@ def format_tile_list(tiles: tuple[int, ...], cols: int = 5) -> str:
         f"({tile_to_row_col(tile, cols)[0] + 1},{tile_to_row_col(tile, cols)[1] + 1})"
         for tile in tiles
     )
+
+
+def format_squares(tiles: tuple[int, ...]) -> str:
+    """Same line as lucasholder/fair CLI mines output."""
+    return f"Squares: {list(tiles)}"

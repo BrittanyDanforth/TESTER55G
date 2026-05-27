@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch the Stake-style Mines detector / predictor GUI."""
+"""Launch the Stake-style Mines provably-fair verifier GUI."""
 
 from mines_predictor.gui import main
 

@@ -4,6 +4,7 @@ import unittest
 
 from mines_predictor.detector import MinesDetector, SeedBundle
 from mines_predictor.provably_fair import (
+    format_squares,
     StakeRNG,
     generate_floats,
     hash_server_seed,
@@ -27,6 +28,10 @@ class StakeOfficialVectors(unittest.TestCase):
             "a4e53dc2f480b8fce6fe688b1317658b446299df23ad533394406427c8c19557",
         )
         self.assertTrue(verify_server_seed_hash("server seed", digest))
+
+    def test_format_squares_matches_fair_cli(self) -> None:
+        result = predict_mines("server seed", "client seed", 1, 3)
+        self.assertEqual(format_squares(result.mine_tiles), "Squares: [18, 15, 5]")
 
     def test_prediction_result(self) -> None:
         result = predict_mines("server seed", "client seed", 1, 3)

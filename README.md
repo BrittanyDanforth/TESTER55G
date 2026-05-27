@@ -1,6 +1,8 @@
-# Mines Detector (Python GUI)
+# Mines Verifier (Python GUI)
 
-Detect mine positions on a **Stake-style** 5×5 provably fair grid. Works for **your own site** (same math as Stake) — no need to have stake.com open.
+Reproduce mine positions on a **Stake-style** 5×5 provably fair grid — the same way legitimate verifiers do ([lucasholder/fair](https://github.com/lucasholder/fair), Stake’s in-game verify modal). Built for **your own offline / Stake-compatible site**, not random guessing.
+
+> **Note:** GitHub repos titled “stake mines predictor” with ML or “pattern recognition” are scams. Real tools only **verify** outcomes from **server seed + client seed + bet #** after you have the unhashed server seed.
 
 ## Run
 
@@ -10,19 +12,22 @@ python3 main.py
 
 Linux: `sudo apt install python3-tk`
 
-## Offline demo mode (top right)
+## Cross-check with fair CLI
 
-Turn **Offline demo mode** on to try detection instantly with **real verified seeds** (from Stake’s published provably fair test vectors). You should see **3 mines** at tiles **18, 15, 5**.
+Official Stake test vector (3 mines, bet **1**):
 
-Turn it **off** to paste seeds from **your site’s** fairness page.
+```bash
+fair mines "client seed" "server seed" 1
+# Squares: [18, 15, 5]
+```
 
-## Your site (live mode)
+Turn **Offline demo** on in the app, set mines to **3**, bet **#1**, then **Verify mines** — you should see the same squares and grid.
 
-1. Copy **unhashed server seed** + **client seed** from your game’s fairness settings  
-2. Set **mines on board** to match the game  
-3. Click **Detect mines**
+## Live mode
 
-Uses **game round 0** for your seeds (first round with that pair). Same algorithm as Stake Originals Mines.
+1. Copy **unhashed server seed** + **client seed** from your fairness page  
+2. Set **mines on board** and **bet # (nonce)** to match the round you are checking  
+3. Click **Verify mines** (only the button updates the board)
 
 ## Tests
 
@@ -30,8 +35,10 @@ Uses **game round 0** for your seeds (first round with that pair). Same algorith
 python3 -m unittest discover -s tests -v
 ```
 
-## Demo reference
+## Reference
 
-| Server seed | Client seed | Round | Mines | Result tiles |
+| Server seed | Client seed | Bet # | Mines | Result tiles |
 |-------------|-------------|-------|-------|----------------|
 | `server seed` | `client seed` | 1 | 3 | 18, 15, 5 |
+
+Algorithm: HMAC-SHA256, Fisher–Yates pick-and-remove — documented in `mines_predictor/provably_fair.py` and [lucasholder/fair `mines.rs`](https://github.com/lucasholder/fair/blob/master/src/games/mines.rs).
