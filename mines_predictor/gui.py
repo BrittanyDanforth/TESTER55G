@@ -283,9 +283,8 @@ class MinesPredictorApp:
     def _on_demo_toggle(self) -> None:
         self._apply_demo_mode()
 
-    def _on_live_seed_edited(self, _event=None) -> None:
-        if self.demo_mode.get():
-            return
+    def _snapshot_fields_to_buffer(self) -> None:
+        """Remember current seed fields (used before entering demo)."""
         self._saved_live_seeds = {
             "server": self.server_seed_var.get(),
             "client": self.client_seed_var.get(),
@@ -293,43 +292,50 @@ class MinesPredictorApp:
             "mines": self.mine_count_var.get(),
         }
 
+    def _on_live_seed_edited(self, _event=None) -> None:
+        if self.demo_mode.get():
+            return
+        self._snapshot_fields_to_buffer()
+
     def _apply_demo_mode(self) -> None:
         if self.demo_mode.get():
-            if not self._saved_live_seeds and self.server_seed_var.get().strip():
-                self._on_live_seed_edited()
+            current_server = self.server_seed_var.get().strip()
+            if current_server and current_server != OFFLINE_DEMO.server_seed:
+                self._snapshot_fields_to_buffer()
             self._load_demo_seeds()
             self._set_seed_inputs_enabled(False)
             self.subtitle_label.configure(
                 text="Offline demo — real Stake-style math, no site needed. "
-                "Toggle off to paste seeds from your own site."
+                "Turn off demo to use your own site seeds (fields stay editable)."
             )
             self.demo_banner.configure(
                 text="  DEMO: verified seeds · mines at tiles 18, 15, 5 (with 3 mines)  "
             )
             self.root.title("Mines Detector — Offline demo")
-        else:
-            self._set_seed_inputs_enabled(True)
-            self._restore_live_seeds()
-            self.subtitle_label.configure(
-                text="Paste server + client seeds from YOUR site (same provably fair "
-                "style as Stake). Set mine count to match the game, then detect."
-            )
-            self.demo_banner.configure(text="")
-            self.root.title("Mines Detector — Your site")
+            self._on_predict(show_errors=True)
+            return
 
-        if self.demo_mode.get():
-            self._on_predict()
-        elif (
-            self.server_seed_var.get().strip()
-            and self.client_seed_var.get().strip()
-        ):
-            self._on_predict()
+        # Leaving demo → live mode
+        self._set_seed_inputs_enabled(True)
+        if self._saved_live_seeds.get("server") or self._saved_live_seeds.get("client"):
+            self._restore_live_seeds()
+        # else: keep whatever is already in the fields (demo seeds stay for editing)
+
+        self.subtitle_label.configure(
+            text="Paste or edit seeds from YOUR site. Click Detect mines when ready."
+        )
+        self.demo_banner.configure(text="")
+        self.root.title("Mines Detector — Your site")
+
+        if self._has_valid_live_seeds():
+            self._on_predict(show_errors=False)
         else:
-            self._reset_grid()
-            self.status_label.configure(
-                text="Paste seeds from your site, then click Detect mines.",
-                fg=COLORS["muted"],
-            )
+            self._show_live_ready_state()
+
+    def _has_valid_live_seeds(self) -> bool:
+        return bool(
+            self.server_seed_var.get().strip() and self.client_seed_var.get().strip()
+        )
 
     def _load_demo_seeds(self) -> None:
         self.server_seed_var.set(OFFLINE_DEMO.server_seed)
@@ -338,16 +344,28 @@ class MinesPredictorApp:
         self.mine_count_var.set(str(OFFLINE_DEMO.mine_count))
 
     def _restore_live_seeds(self) -> None:
-        if not self._saved_live_seeds:
-            self.server_seed_var.set("")
-            self.client_seed_var.set("")
-            self.server_hash_var.set("")
-            self.mine_count_var.set("3")
-            return
         self.server_seed_var.set(self._saved_live_seeds.get("server", ""))
         self.client_seed_var.set(self._saved_live_seeds.get("client", ""))
         self.server_hash_var.set(self._saved_live_seeds.get("hash", ""))
         self.mine_count_var.set(self._saved_live_seeds.get("mines", "3"))
+
+    def _show_live_ready_state(self) -> None:
+        self._reset_grid()
+        self.status_label.configure(
+            text="Ready — paste seeds, then click Detect mines",
+            fg=COLORS["muted"],
+        )
+        self.result_text.configure(state=tk.NORMAL)
+        self.result_text.delete("1.0", tk.END)
+        self.result_text.insert(
+            tk.END,
+            "Live mode\n"
+            f"{'=' * 40}\n"
+            "Paste server seed and client seed from your site's fairness page.\n"
+            "Set mines on board to match your game, then click Detect mines.\n\n"
+            "No error — waiting for your seeds.\n",
+        )
+        self.result_text.configure(state=tk.DISABLED)
 
     def _set_seed_inputs_enabled(self, enabled: bool) -> None:
         entry_state = tk.NORMAL if enabled else tk.DISABLED
@@ -358,10 +376,12 @@ class MinesPredictorApp:
 
     def _on_mine_count_changed(self, _event=None) -> None:
         if self.demo_mode.get():
-            self.root.after(80, self._on_predict)
+            self.root.after(80, lambda: self._on_predict(show_errors=True))
+        elif self._has_valid_live_seeds():
+            self.root.after(80, lambda: self._on_predict(show_errors=False))
 
     def _on_return_key(self, _event=None) -> None:
-        self._on_predict()
+        self._on_predict(show_errors=True)
 
     def _parse_mine_count(self) -> int:
         self.root.update_idletasks()
@@ -409,15 +429,29 @@ class MinesPredictorApp:
         self.status_label.configure(text="Detecting…", fg=COLORS["muted"])
         self.root.update_idletasks()
 
-    def _on_predict(self, _event=None) -> None:
+    def _on_predict(self, _event=None, *, show_errors: bool = True) -> None:
         self.root.update_idletasks()
+
+        if not self.demo_mode.get() and not self._has_valid_live_seeds():
+            self._show_live_ready_state()
+            if show_errors:
+                messagebox.showinfo(
+                    "Seeds needed",
+                    "Paste your server seed and client seed from your site's "
+                    "fairness page, then click Detect mines.",
+                )
+            return
+
         self._reset_grid()
         try:
             bundle = self._read_bundle()
             result = self._detector.detect(bundle)
         except ValueError as exc:
             self.status_label.configure(text="Detection failed", fg=COLORS["danger"])
-            messagebox.showerror("Detection failed", str(exc))
+            if show_errors:
+                messagebox.showerror("Detection failed", str(exc))
+            else:
+                self._set_result_text(f"Could not detect:\n{exc}\n")
             return
 
         demo_note = ""
