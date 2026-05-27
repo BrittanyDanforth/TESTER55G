@@ -12,10 +12,17 @@ from mines_predictor.gui import MinesPredictorApp
 
 class DemoToggleTests(unittest.TestCase):
     def test_demo_off_keeps_seeds_no_crash(self) -> None:
-        root_started = False
         try:
             app = MinesPredictorApp()
-            root_started = True
+        except tk.TclError as exc:
+            if "no display" in str(exc).lower():
+                self.skipTest("No display for GUI tests")
+            raise
+
+        try:
+            if app._detect_after_id is not None:
+                app.root.after_cancel(app._detect_after_id)
+
             app.demo_mode.set(True)
             app._apply_demo_mode()
             app.root.update()
@@ -26,11 +33,10 @@ class DemoToggleTests(unittest.TestCase):
 
             self.assertTrue(app.server_seed_var.get().strip())
             self.assertTrue(app.client_seed_var.get().strip())
+        finally:
+            if app._detect_after_id is not None:
+                app.root.after_cancel(app._detect_after_id)
             app.root.destroy()
-        except tk.TclError as exc:
-            if "no display" in str(exc).lower():
-                self.skipTest("No display for GUI tests")
-            raise
 
 
 if __name__ == "__main__":

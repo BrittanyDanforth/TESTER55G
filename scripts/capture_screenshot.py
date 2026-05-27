@@ -27,7 +27,7 @@ def main() -> None:
         print(f"Saved {OUTPUT}")
         app.root.quit()
 
-    app.root.after(600, shot)
+    app.root.after(500, shot)
     app.root.mainloop()
 
 
