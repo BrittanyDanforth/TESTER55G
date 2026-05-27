@@ -24,7 +24,7 @@ from mines_predictor.theme import (
 
 COLS = 5
 ROWS = 5
-AUTO_DETECT_MS = 450
+MINE_AUTO_MS = 350
 
 
 class MinesPredictorApp:
@@ -40,20 +40,19 @@ class MinesPredictorApp:
 
         self.demo_mode = tk.BooleanVar(value=True)
         self._saved_live_seeds: dict[str, str] = {}
-        self._detect_after_id: str | None = None
+        self._mine_auto_id: str | None = None
         self._suppress_auto = False
         self._last_bundle_key: tuple[str, str, int, int, bool] | None = None
+        self._last_rendered_mines: frozenset[int] | None = None
 
         self.server_seed_var = tk.StringVar()
         self.client_seed_var = tk.StringVar()
         self.server_hash_var = tk.StringVar()
         self.mine_count_var = tk.StringVar(value="3")
-        self._detecting = False
-        self._last_rendered_mines: frozenset[int] | None = None
 
         configure_styles(self.root)
         self._build_layout()
-        self.root.bind("<Return>", lambda _e: self._run_detect(show_popup=True))
+        self.root.bind("<Return>", self._on_detect_click)
         self.root.after(100, self._apply_demo_mode)
 
     def _build_layout(self) -> None:
@@ -118,16 +117,13 @@ class MinesPredictorApp:
             style="Demo.TCheckbutton",
         ).pack(padx=12, pady=8)
 
-        accent_line = tk.Frame(parent, bg=COLORS["accent"], height=2)
-        accent_line.pack(fill=tk.X, pady=(14, 0))
+        tk.Frame(parent, bg=COLORS["accent"], height=2).pack(fill=tk.X, pady=(14, 0))
 
         self.demo_banner_frame = tk.Frame(parent, bg=COLORS["demo_bg"])
-        self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
         self.demo_banner_frame.pack_forget()
 
         banner_inner = tk.Frame(self.demo_banner_frame, bg=COLORS["demo_bg"])
         banner_inner.pack(fill=tk.X, padx=12, pady=10)
-
         tk.Frame(banner_inner, bg=COLORS["demo"], width=3).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         self.demo_banner = tk.Label(
             banner_inner,
@@ -169,12 +165,13 @@ class MinesPredictorApp:
 
         self._build_mine_stepper(inner)
 
-        ttk.Button(
+        self.detect_btn = ttk.Button(
             inner,
             text="Detect mines",
             style="Primary.TButton",
-            command=lambda: self._run_detect(show_popup=True),
-        ).pack(fill=tk.X, pady=(0, 8))
+            command=self._on_detect_click,
+        )
+        self.detect_btn.pack(fill=tk.X, pady=(0, 8))
 
         self.verify_btn = ttk.Button(
             inner,
@@ -222,8 +219,8 @@ class MinesPredictorApp:
             disabledforeground=COLORS["text"],
         )
         self.mine_entry.pack(ipady=4)
-        self.mine_entry.bind("<KeyRelease>", self._on_mine_entry_key)
-        self.mine_entry.bind("<Return>", lambda _e: self._run_detect(show_popup=True))
+        self.mine_entry.bind("<KeyRelease>", self._on_mine_count_edited)
+        self.mine_entry.bind("<Return>", self._on_detect_click)
 
         tk.Label(
             center,
@@ -240,39 +237,6 @@ class MinesPredictorApp:
             command=lambda: self._step_mines(1),
         )
         self.mine_plus_btn.grid(row=0, column=2, sticky="ns", padx=(0, 4))
-
-    def _step_mines(self, delta: int) -> None:
-        try:
-            value = int(self.mine_count_var.get().strip())
-        except ValueError:
-            value = 3
-        value = max(1, min(24, value + delta))
-        if str(value) != self.mine_count_var.get().strip():
-            self.mine_count_var.set(str(value))
-            self._schedule_auto_detect()
-
-    def _on_mine_entry_key(self, _event=None) -> None:
-        if self._suppress_auto:
-            return
-        raw = self.mine_count_var.get().strip()
-        if not raw:
-            return
-        if not raw.isdigit():
-            cleaned = "".join(ch for ch in raw if ch.isdigit())
-            if cleaned != raw:
-                self._suppress_auto = True
-                self.mine_count_var.set(cleaned)
-                self._suppress_auto = False
-            return
-        value = int(raw)
-        if value > 24:
-            self._suppress_auto = True
-            self.mine_count_var.set("24")
-            self._suppress_auto = False
-            value = 24
-        if value < 1:
-            return
-        self._schedule_auto_detect()
 
     def _field(
         self,
@@ -309,7 +273,7 @@ class MinesPredictorApp:
             font=FONTS["mono"] if mono else FONTS["body"],
         )
         entry.pack(fill=tk.X, ipady=7, ipadx=6, padx=1, pady=1)
-        entry.bind("<KeyRelease>", self._on_any_input)
+        entry.bind("<Return>", self._on_detect_click)
 
         def on_focus_in(_e: tk.Event, frame: tk.Frame = border) -> None:
             frame.configure(highlightbackground=COLORS["border_focus"])
@@ -328,7 +292,12 @@ class MinesPredictorApp:
         inner = tk.Frame(card, bg=COLORS["panel"])
         inner.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
 
-        self.status_pill = tk.Frame(inner, bg=COLORS["pill_bg"], highlightbackground=COLORS["border"], highlightthickness=1)
+        self.status_pill = tk.Frame(
+            inner,
+            bg=COLORS["pill_bg"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
         self.status_pill.pack(pady=(0, 12))
 
         self.status_label = tk.Label(
@@ -342,7 +311,12 @@ class MinesPredictorApp:
         )
         self.status_label.pack()
 
-        grid_outer = tk.Frame(inner, bg=COLORS["bg_deep"], highlightbackground=COLORS["border"], highlightthickness=1)
+        grid_outer = tk.Frame(
+            inner,
+            bg=COLORS["bg_deep"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
         grid_outer.pack()
 
         grid_wrap = tk.Frame(grid_outer, bg=COLORS["bg_deep"])
@@ -375,8 +349,12 @@ class MinesPredictorApp:
         ):
             item = tk.Frame(legend, bg=COLORS["panel"])
             item.pack(side=tk.LEFT, padx=(0, 20))
-            tk.Label(item, text=icon, bg=COLORS["panel"], font=FONTS["body"]).pack(side=tk.LEFT, padx=(0, 6))
-            tk.Label(item, text=label, bg=COLORS["panel"], fg=color, font=FONTS["label"]).pack(side=tk.LEFT)
+            tk.Label(item, text=icon, bg=COLORS["panel"], font=FONTS["body"]).pack(
+                side=tk.LEFT, padx=(0, 6)
+            )
+            tk.Label(
+                item, text=label, bg=COLORS["panel"], fg=color, font=FONTS["label"]
+            ).pack(side=tk.LEFT)
 
     def _build_output_panel(self, parent: tk.Frame) -> None:
         card = ttk.LabelFrame(parent, text="  Results", style="Card.TLabelframe")
@@ -396,7 +374,7 @@ class MinesPredictorApp:
 
         tk.Label(
             inner,
-            text="mines detected",
+            text="bombs found",
             bg=COLORS["panel"],
             fg=COLORS["muted"],
             font=FONTS["label"],
@@ -406,7 +384,7 @@ class MinesPredictorApp:
 
         self.result_bombs = tk.Label(
             inner,
-            text="Bombs: —",
+            text="Tap Detect to scan the board",
             bg=COLORS["panel"],
             fg=COLORS["text"],
             font=FONTS["body"],
@@ -417,40 +395,70 @@ class MinesPredictorApp:
 
         self.result_safe = tk.Label(
             inner,
-            text="Safe: —",
+            text="",
             bg=COLORS["panel"],
             fg=COLORS["text_secondary"],
             font=FONTS["body"],
+            wraplength=LEFT_PANEL_WIDTH - 48,
+            justify=tk.LEFT,
         )
         self.result_safe.pack(anchor=tk.W, pady=4)
 
-    def _on_any_input(self, *_args) -> None:
-        if self._suppress_auto or self._detecting:
-            return
-        self._schedule_auto_detect()
+    def _on_detect_click(self, _event=None) -> None:
+        """Manual detect — always runs a full scan."""
+        self._cancel_mine_auto()
+        self._run_detect(show_popup=True, force=True)
 
-    def _peek_bundle_key(self) -> tuple[str, str, int, int, bool] | None:
+    def _cancel_mine_auto(self) -> None:
+        if self._mine_auto_id is not None:
+            self.root.after_cancel(self._mine_auto_id)
+            self._mine_auto_id = None
+
+    def _schedule_mine_auto(self) -> None:
+        if self._suppress_auto:
+            return
+        self._cancel_mine_auto()
+        self._mine_auto_id = self.root.after(MINE_AUTO_MS, self._mine_auto_detect)
+
+    def _mine_auto_detect(self) -> None:
+        self._mine_auto_id = None
+        self._run_detect(show_popup=False, force=True)
+
+    def _step_mines(self, delta: int) -> None:
         try:
-            return self._bundle_key(self._read_bundle())
+            value = int(self._read_mine_count_raw())
         except ValueError:
-            return None
+            value = 3
+        value = max(1, min(24, value + delta))
+        self._set_mine_count(value)
+        self._schedule_mine_auto()
 
-    def _schedule_auto_detect(self) -> None:
-        if self._suppress_auto or self._detecting:
+    def _on_mine_count_edited(self, _event=None) -> None:
+        if self._suppress_auto:
             return
-        key = self._peek_bundle_key()
-        if key is not None and key == self._last_bundle_key:
+        raw = self._read_mine_count_raw()
+        if not raw:
             return
-        if self._detect_after_id is not None:
-            self.root.after_cancel(self._detect_after_id)
-        self._detect_after_id = self.root.after(AUTO_DETECT_MS, self._auto_detect)
+        if not raw.isdigit():
+            cleaned = "".join(ch for ch in raw if ch.isdigit())
+            if cleaned:
+                self._set_mine_count(int(cleaned))
+            return
+        value = int(raw)
+        if value > 24:
+            value = 24
+        if value < 1:
+            return
+        self._set_mine_count(value)
+        self._schedule_mine_auto()
 
-    def _auto_detect(self) -> None:
-        self._detect_after_id = None
-        if self.demo_mode.get():
-            self._run_detect(show_popup=False)
-        elif self._has_valid_live_seeds():
-            self._run_detect(show_popup=False)
+    def _set_mine_count(self, value: int) -> None:
+        text = str(max(1, min(24, value)))
+        if self._read_mine_count_raw() == text:
+            return
+        self._suppress_auto = True
+        self.mine_count_var.set(text)
+        self._suppress_auto = False
 
     def _on_demo_toggle(self) -> None:
         self._apply_demo_mode()
@@ -464,29 +472,35 @@ class MinesPredictorApp:
         }
 
     def _apply_demo_mode(self) -> None:
+        self._cancel_mine_auto()
+        self._last_bundle_key = None
+        self._last_rendered_mines = None
+
         if self.demo_mode.get():
             if self._read_server() and self._read_server() != OFFLINE_DEMO.server_seed:
                 self._snapshot_fields_to_buffer()
             self._load_demo_seeds()
             self._set_seed_inputs_enabled(False)
             self.subtitle_label.configure(
-                text="Demo mode — change mine count to see the board update."
+                text="Demo — change mine count or press Detect. Seeds are fixed."
             )
-            self.demo_banner.configure(text="Verified demo seeds · 3 mines at (4,4), (4,1), (2,1)")
+            self.demo_banner.configure(
+                text="Verified demo · 3 mines land on (4,4), (4,1), (2,1)"
+            )
             self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
-            self.root.title("Mines Detector")
-            self._run_detect(show_popup=False)
+            self._run_detect(show_popup=False, force=True)
             return
 
         self._set_seed_inputs_enabled(True)
         if self._saved_live_seeds.get("server") or self._saved_live_seeds.get("client"):
             self._restore_live_seeds()
-        self.subtitle_label.configure(text="Paste your seeds — the board updates as you type.")
+        self.subtitle_label.configure(
+            text="Paste seeds, set mine count, then press Detect mines."
+        )
         self.demo_banner_frame.pack_forget()
-        self.root.title("Mines Detector")
 
         if self._has_valid_live_seeds():
-            self._run_detect(show_popup=False)
+            self._run_detect(show_popup=False, force=True)
         else:
             self._show_waiting_state()
 
@@ -515,15 +529,17 @@ class MinesPredictorApp:
         fg = COLORS["text"] if enabled else COLORS["muted"]
         for entry in self._seed_entries:
             entry.configure(state=state, bg=bg, fg=fg)
-        entry_state = tk.NORMAL if enabled else tk.DISABLED
-        self.mine_entry.configure(state=entry_state)
+        self.mine_entry.configure(state=tk.NORMAL)
         if enabled:
             self.mine_minus_btn.state(["!disabled"])
             self.mine_plus_btn.state(["!disabled"])
+            self.detect_btn.state(["!disabled"])
+            self.verify_btn.state(["!disabled"])
         else:
-            self.mine_minus_btn.state(["disabled"])
-            self.mine_plus_btn.state(["disabled"])
-        self.verify_btn.state(["!disabled"] if enabled else ["disabled"])
+            self.mine_minus_btn.state(["!disabled"])
+            self.mine_plus_btn.state(["!disabled"])
+            self.detect_btn.state(["!disabled"])
+            self.verify_btn.state(["disabled"])
 
     def _read_server(self) -> str:
         return self._get_entry_text(0, self.server_seed_var)
@@ -543,20 +559,25 @@ class MinesPredictorApp:
 
     def _read_mine_count_raw(self) -> str:
         self.root.update_idletasks()
+        try:
+            from_entry = self.mine_entry.get().strip()
+            if from_entry:
+                return from_entry
+        except tk.TclError:
+            pass
         return self.mine_count_var.get().strip()
 
     def _parse_mine_count(self) -> int:
         raw = self._read_mine_count_raw()
+        if not raw:
+            raise ValueError("Enter how many mines are on the board (1–24)")
         try:
             count = int(raw)
         except ValueError as exc:
-            raise ValueError("Mines must be a number from 1 to 24") from exc
+            raise ValueError("Mines must be a whole number from 1 to 24") from exc
         if count < 1 or count > 24:
             raise ValueError("Mines must be from 1 to 24")
-        if self.mine_count_var.get().strip() != str(count):
-            self._suppress_auto = True
-            self.mine_count_var.set(str(count))
-            self._suppress_auto = False
+        self._set_mine_count(count)
         return count
 
     def _read_bundle(self) -> SeedBundle:
@@ -571,9 +592,9 @@ class MinesPredictorApp:
         server = self._read_server()
         client = self._read_client()
         if not server:
-            raise ValueError("Add your server seed")
+            raise ValueError("Paste your server seed first")
         if not client:
-            raise ValueError("Add your client seed")
+            raise ValueError("Paste your client seed first")
         return SeedBundle(
             server_seed=server,
             client_seed=client,
@@ -583,9 +604,9 @@ class MinesPredictorApp:
 
     def _show_waiting_state(self) -> None:
         self._reset_grid()
-        self._set_status("Waiting for seeds", COLORS["muted"])
+        self._set_status("Add your seeds, then press Detect", COLORS["muted"])
         self.stat_mines.configure(text="—", fg=COLORS["muted"])
-        self.result_bombs.configure(text="Paste server + client seeds")
+        self.result_bombs.configure(text="Paste server + client seed")
         self.result_safe.configure(text="")
 
     def _set_status(self, text: str, color: str) -> None:
@@ -603,20 +624,17 @@ class MinesPredictorApp:
                     highlightthickness=2,
                 )
 
-    def _run_detect(self, *, show_popup: bool) -> None:
-        if self._detecting:
-            return
-        self._detecting = True
-        if self._detect_after_id is not None:
-            self.root.after_cancel(self._detect_after_id)
-            self._detect_after_id = None
+    def _run_detect(self, *, show_popup: bool, force: bool) -> None:
+        self.root.update_idletasks()
+        self.detect_btn.state(["disabled"])
 
         try:
-            self.root.update_idletasks()
-
             if not self.demo_mode.get() and not self._has_valid_live_seeds():
                 if show_popup:
-                    messagebox.showinfo("Need seeds", "Paste server seed and client seed first.")
+                    messagebox.showinfo(
+                        "Seeds needed",
+                        "Paste your server seed and client seed, then press Detect mines.",
+                    )
                 else:
                     self._show_waiting_state()
                 return
@@ -626,26 +644,36 @@ class MinesPredictorApp:
             except ValueError as exc:
                 self._set_status(str(exc), COLORS["danger"])
                 if show_popup:
-                    messagebox.showerror("Can't detect", str(exc))
+                    messagebox.showerror("Cannot detect", str(exc))
                 return
 
             bundle_key = self._bundle_key(bundle)
-            if bundle_key == self._last_bundle_key:
+            if not force and bundle_key == self._last_bundle_key:
+                self._set_status("Board already matches these settings", COLORS["muted"])
                 return
 
+            self._set_status("Scanning board…", COLORS["text_secondary"])
+
             result = self._detector.detect(bundle)
-            self._render_grid(result)
+            self._render_grid(result, force=True)
             self._write_result(result)
             self._last_bundle_key = bundle_key
 
             if self.demo_mode.get():
                 ok, _ = run_demo_detection(bundle.mine_count)
                 color = COLORS["demo"] if ok else COLORS["danger"]
+                label = "Detection complete"
             else:
+                ok = True
                 color = COLORS["accent"]
-            self._set_status(f"{result.mine_count} mines on board", color)
+                label = "Detection complete"
+
+            self._set_status(f"{label} · {result.mine_count} bombs", color)
         finally:
-            self._detecting = False
+            if self.demo_mode.get() or self._has_valid_live_seeds():
+                self.detect_btn.state(["!disabled"])
+            else:
+                self.detect_btn.state(["disabled"])
 
     def _bundle_key(self, bundle: SeedBundle) -> tuple[str, str, int, int, bool]:
         return (
@@ -668,9 +696,9 @@ class MinesPredictorApp:
         else:
             messagebox.showerror("Mismatch", f"Expected:\n{computed}")
 
-    def _render_grid(self, result: PredictionResult) -> None:
+    def _render_grid(self, result: PredictionResult, *, force: bool = False) -> None:
         mines = frozenset(result.mine_tiles)
-        if mines == self._last_rendered_mines:
+        if not force and mines == self._last_rendered_mines:
             return
         self._last_rendered_mines = mines
 
@@ -698,12 +726,11 @@ class MinesPredictorApp:
     def _write_result(self, result: PredictionResult) -> None:
         bombs = format_tile_list(result.mine_tiles)
         self.stat_mines.configure(text=str(result.mine_count), fg=COLORS["accent"])
-        self.result_bombs.configure(text=f"Bombs: {bombs}")
-        self.result_safe.configure(text=f"Safe squares: {len(result.safe_tiles)}")
+        self.result_bombs.configure(text=f"Bomb positions:\n{bombs}")
+        self.result_safe.configure(text=f"Safe tiles: {len(result.safe_tiles)} of 25")
 
     def _on_close(self) -> None:
-        if self._detect_after_id is not None:
-            self.root.after_cancel(self._detect_after_id)
+        self._cancel_mine_auto()
         self.root.destroy()
 
     def run(self) -> None:

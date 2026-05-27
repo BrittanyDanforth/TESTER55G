@@ -20,8 +20,8 @@ class DemoToggleTests(unittest.TestCase):
             raise
 
         try:
-            if app._detect_after_id is not None:
-                app.root.after_cancel(app._detect_after_id)
+            if app._mine_auto_id is not None:
+                app.root.after_cancel(app._mine_auto_id)
 
             app.demo_mode.set(True)
             app._apply_demo_mode()
@@ -34,8 +34,8 @@ class DemoToggleTests(unittest.TestCase):
             self.assertTrue(app.server_seed_var.get().strip())
             self.assertTrue(app.client_seed_var.get().strip())
         finally:
-            if app._detect_after_id is not None:
-                app.root.after_cancel(app._detect_after_id)
+            if app._mine_auto_id is not None:
+                app.root.after_cancel(app._mine_auto_id)
             app.root.destroy()
 
 
