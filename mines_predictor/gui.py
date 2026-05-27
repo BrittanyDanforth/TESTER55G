@@ -12,28 +12,19 @@ from mines_predictor.provably_fair import (
     format_tile_list,
     hash_server_seed,
 )
+from mines_predictor.theme import (
+    CELL_GAP,
+    CELL_PAD,
+    COLORS,
+    FONTS,
+    LEFT_PANEL_WIDTH,
+    configure_styles,
+)
 
 
 COLS = 5
 ROWS = 5
 AUTO_DETECT_MS = 200
-
-COLORS = {
-    "bg": "#0f1923",
-    "panel": "#1a2c38",
-    "panel_border": "#2f4553",
-    "text": "#e8f0f6",
-    "muted": "#8fa3b0",
-    "accent": "#00e701",
-    "danger": "#ff4d4d",
-    "demo": "#f7b731",
-    "safe": "#1e3a2f",
-    "safe_border": "#00e701",
-    "mine": "#3d1515",
-    "mine_border": "#ff4d4d",
-    "hidden": "#213743",
-    "input_bg": "#0f212e",
-}
 
 
 class MinesPredictorApp:
@@ -41,7 +32,7 @@ class MinesPredictorApp:
         self.root = tk.Tk()
         self.root.title("Mines Detector")
         self.root.configure(bg=COLORS["bg"])
-        self.root.minsize(700, 660)
+        self.root.minsize(820, 720)
 
         self._detector = MinesDetector()
         self._cell_labels: list[list[tk.Label]] = []
@@ -59,217 +50,317 @@ class MinesPredictorApp:
         self.mine_count_var = tk.StringVar(value="3")
         self.mine_count_var.trace_add("write", self._on_any_input)
 
-        self._build_style()
+        configure_styles(self.root)
         self._build_layout()
         self.root.bind("<Return>", lambda _e: self._run_detect(show_popup=True))
-
         self.root.after(100, self._apply_demo_mode)
 
-    def _build_style(self) -> None:
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TFrame", background=COLORS["bg"])
-        style.configure(
-            "Panel.TLabelframe",
-            background=COLORS["panel"],
-            foreground=COLORS["text"],
-            bordercolor=COLORS["panel_border"],
-        )
-        style.configure(
-            "Panel.TLabelframe.Label",
-            background=COLORS["panel"],
-            foreground=COLORS["text"],
-            font=("Segoe UI", 10, "bold"),
-        )
-        style.configure("TLabel", background=COLORS["panel"], foreground=COLORS["text"])
-        style.configure("Bg.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
-        style.configure("Accent.TButton", font=("Segoe UI", 11, "bold"))
-        style.configure(
-            "Demo.TCheckbutton",
-            background=COLORS["bg"],
-            foreground=COLORS["demo"],
-            font=("Segoe UI", 10, "bold"),
-        )
-
     def _build_layout(self) -> None:
-        top = tk.Frame(self.root, bg=COLORS["bg"])
-        top.pack(fill=tk.X, padx=16, pady=(10, 0))
+        outer = tk.Frame(self.root, bg=COLORS["bg"])
+        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
 
-        tk.Label(
-            top,
-            text="Mines Detector",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 15, "bold"),
-        ).pack(side=tk.LEFT)
+        self._build_header(outer)
 
-        ttk.Checkbutton(
-            top,
-            text="Offline demo mode",
-            variable=self.demo_mode,
-            command=self._on_demo_toggle,
-            style="Demo.TCheckbutton",
-        ).pack(side=tk.RIGHT)
+        body = tk.Frame(outer, bg=COLORS["bg"])
+        body.pack(fill=tk.BOTH, expand=True, pady=(16, 0))
 
-        self.subtitle_label = tk.Label(
-            self.root,
-            text="",
-            bg=COLORS["bg"],
-            fg=COLORS["muted"],
-            font=("Segoe UI", 10),
-            wraplength=640,
-            justify=tk.LEFT,
-        )
-        self.subtitle_label.pack(anchor=tk.W, padx=16, pady=(6, 4))
+        left = tk.Frame(body, bg=COLORS["bg"], width=LEFT_PANEL_WIDTH)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 16))
+        left.pack_propagate(False)
 
-        self.demo_banner = tk.Label(
-            self.root,
-            text="",
-            bg="#2a2208",
-            fg=COLORS["demo"],
-            font=("Segoe UI", 9, "bold"),
-            padx=10,
-            pady=6,
-        )
-        self.demo_banner.pack(fill=tk.X, padx=16, pady=(0, 8))
-
-        body = ttk.Frame(self.root, style="TFrame")
-        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
-
-        left = ttk.Frame(body, style="TFrame")
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12))
-        right = ttk.Frame(body, style="TFrame")
+        right = tk.Frame(body, bg=COLORS["bg"])
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self._build_seed_panel(left)
-        self._build_grid_panel(right)
         self._build_output_panel(left)
+        self._build_grid_panel(right)
 
-    def _build_seed_panel(self, parent: ttk.Frame) -> None:
-        self.seed_frame = ttk.LabelFrame(parent, text="Seeds", style="Panel.TLabelframe")
-        self.seed_frame.pack(fill=tk.X, pady=(0, 10))
+    def _build_header(self, parent: tk.Frame) -> None:
+        header = tk.Frame(parent, bg=COLORS["bg"])
+        header.pack(fill=tk.X)
 
-        self._labeled_entry(self.seed_frame, "Server seed", self.server_seed_var, 0)
-        self._labeled_entry(self.seed_frame, "Client seed", self.client_seed_var, 1)
-        self._labeled_entry(self.seed_frame, "Seed hash (optional)", self.server_hash_var, 2)
+        title_block = tk.Frame(header, bg=COLORS["bg"])
+        title_block.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        mine_row = ttk.Frame(self.seed_frame, style="TFrame")
-        mine_row.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=8)
-        ttk.Label(mine_row, text="Mines (1–24)").pack(side=tk.LEFT)
+        tk.Label(
+            title_block,
+            text="Mines Detector",
+            bg=COLORS["bg"],
+            fg=COLORS["text"],
+            font=FONTS["title"],
+        ).pack(anchor=tk.W)
+
+        self.subtitle_label = tk.Label(
+            title_block,
+            text="",
+            bg=COLORS["bg"],
+            fg=COLORS["text_secondary"],
+            font=FONTS["subtitle"],
+            wraplength=480,
+            justify=tk.LEFT,
+        )
+        self.subtitle_label.pack(anchor=tk.W, pady=(4, 0))
+
+        demo_wrap = tk.Frame(
+            header,
+            bg=COLORS["panel"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        demo_wrap.pack(side=tk.RIGHT, padx=(12, 0), pady=4)
+
+        ttk.Checkbutton(
+            demo_wrap,
+            text="  Offline demo",
+            variable=self.demo_mode,
+            command=self._on_demo_toggle,
+            style="Demo.TCheckbutton",
+        ).pack(padx=12, pady=8)
+
+        accent_line = tk.Frame(parent, bg=COLORS["accent"], height=2)
+        accent_line.pack(fill=tk.X, pady=(14, 0))
+
+        self.demo_banner_frame = tk.Frame(parent, bg=COLORS["demo_bg"])
+        self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
+        self.demo_banner_frame.pack_forget()
+
+        banner_inner = tk.Frame(self.demo_banner_frame, bg=COLORS["demo_bg"])
+        banner_inner.pack(fill=tk.X, padx=12, pady=10)
+
+        tk.Frame(banner_inner, bg=COLORS["demo"], width=3).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        self.demo_banner = tk.Label(
+            banner_inner,
+            text="",
+            bg=COLORS["demo_bg"],
+            fg=COLORS["demo"],
+            font=("Segoe UI", 9, "bold"),
+            anchor=tk.W,
+        )
+        self.demo_banner.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    def _build_seed_panel(self, parent: tk.Frame) -> None:
+        card = ttk.LabelFrame(parent, text="  Seeds & settings", style="Card.TLabelframe")
+        card.pack(fill=tk.X, pady=(0, 12))
+
+        inner = tk.Frame(card, bg=COLORS["panel"])
+        inner.pack(fill=tk.X, padx=12, pady=(4, 12))
+
+        self._field(inner, "Server seed", self.server_seed_var, 0, mono=True)
+        self._field(inner, "Client seed", self.client_seed_var, 1, mono=True)
+        self._field(inner, "Seed hash (optional)", self.server_hash_var, 2, mono=True)
+
+        mine_row = tk.Frame(inner, bg=COLORS["panel"])
+        mine_row.pack(fill=tk.X, pady=(10, 4))
+        tk.Label(
+            mine_row,
+            text="Mines on board",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            mine_row,
+            text="1 – 24",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(side=tk.RIGHT)
+
+        spin_wrap = tk.Frame(
+            inner,
+            bg=COLORS["input_bg"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        spin_wrap.pack(fill=tk.X, pady=(0, 12))
 
         self.mine_spinbox = tk.Spinbox(
-            mine_row,
+            spin_wrap,
             from_=1,
             to=24,
-            width=5,
+            width=6,
             textvariable=self.mine_count_var,
             bg=COLORS["input_bg"],
             fg=COLORS["text"],
             insertbackground=COLORS["text"],
-            buttonbackground=COLORS["panel"],
-            font=("Segoe UI", 10),
+            buttonbackground=COLORS["panel_elevated"],
+            activebackground=COLORS["panel_elevated"],
+            relief=tk.FLAT,
+            font=FONTS["body"],
             command=self._on_any_input,
         )
-        self.mine_spinbox.pack(side=tk.RIGHT)
+        self.mine_spinbox.pack(ipady=6, ipadx=4, padx=2, pady=2)
         for sequence in ("<KeyRelease>", "<ButtonRelease-1>", "<FocusOut>"):
             self.mine_spinbox.bind(sequence, self._on_any_input)
 
-        btn_row = ttk.Frame(self.seed_frame, style="TFrame")
-        btn_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 10))
-
         ttk.Button(
-            btn_row,
-            text="Detect",
-            style="Accent.TButton",
+            inner,
+            text="Detect mines",
+            style="Primary.TButton",
             command=lambda: self._run_detect(show_popup=True),
-        ).pack(fill=tk.X, pady=(0, 6))
+        ).pack(fill=tk.X, pady=(0, 8))
 
         self.verify_btn = ttk.Button(
-            btn_row,
-            text="Check seed hash",
+            inner,
+            text="Verify seed hash",
+            style="Ghost.TButton",
             command=self._on_verify_hash,
         )
         self.verify_btn.pack(fill=tk.X)
 
-        self.seed_frame.columnconfigure(1, weight=1)
-
-    def _labeled_entry(
+    def _field(
         self,
-        parent: ttk.LabelFrame,
+        parent: tk.Frame,
         label: str,
         variable: tk.StringVar,
-        row: int,
+        index: int,
+        *,
+        mono: bool = False,
     ) -> None:
-        ttk.Label(parent, text=label).grid(
-            row=row, column=0, sticky="w", padx=10, pady=(8, 2)
-        )
-        entry = tk.Entry(
+        tk.Label(
             parent,
+            text=label,
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(anchor=tk.W, pady=(8, 4) if index else (0, 4))
+
+        border = tk.Frame(
+            parent,
+            bg=COLORS["input_bg"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        border.pack(fill=tk.X)
+
+        entry = tk.Entry(
+            border,
             textvariable=variable,
             bg=COLORS["input_bg"],
             fg=COLORS["text"],
-            insertbackground=COLORS["text"],
+            insertbackground=COLORS["accent"],
             relief=tk.FLAT,
-            font=("Consolas", 9),
+            font=FONTS["mono"] if mono else FONTS["body"],
         )
-        entry.grid(row=row, column=1, sticky="ew", padx=10, pady=(8, 2), ipady=4)
+        entry.pack(fill=tk.X, ipady=7, ipadx=6, padx=1, pady=1)
         entry.bind("<KeyRelease>", self._on_any_input)
-        entry.bind("<FocusOut>", self._on_any_input)
-        if row < 2:
+
+        def on_focus_in(_e: tk.Event, frame: tk.Frame = border) -> None:
+            frame.configure(highlightbackground=COLORS["border_focus"])
+
+        def on_focus_out(_e: tk.Event, frame: tk.Frame = border) -> None:
+            frame.configure(highlightbackground=COLORS["border"])
+            self._on_any_input()
+
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
+
+        if index < 2:
             variable.trace_add("write", self._on_any_input)
         self._seed_entries.append(entry)
 
-    def _build_grid_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Grid", style="Panel.TLabelframe")
-        frame.pack(fill=tk.BOTH, expand=True)
+    def _build_grid_panel(self, parent: tk.Frame) -> None:
+        card = ttk.LabelFrame(parent, text="  Board", style="Card.TLabelframe")
+        card.pack(fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(card, bg=COLORS["panel"])
+        inner.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
+
+        self.status_pill = tk.Frame(inner, bg=COLORS["pill_bg"], highlightbackground=COLORS["border"], highlightthickness=1)
+        self.status_pill.pack(pady=(0, 12))
 
         self.status_label = tk.Label(
-            frame,
-            text="",
-            bg=COLORS["panel"],
-            fg=COLORS["muted"],
-            font=("Segoe UI", 10),
+            self.status_pill,
+            text="Ready",
+            bg=COLORS["pill_bg"],
+            fg=COLORS["text_secondary"],
+            font=FONTS["body"],
+            padx=16,
+            pady=6,
         )
-        self.status_label.pack(pady=(10, 4))
+        self.status_label.pack()
 
-        grid_wrap = tk.Frame(frame, bg=COLORS["panel"])
-        grid_wrap.pack(padx=16, pady=8)
+        grid_outer = tk.Frame(inner, bg=COLORS["bg_deep"], highlightbackground=COLORS["border"], highlightthickness=1)
+        grid_outer.pack()
+
+        grid_wrap = tk.Frame(grid_outer, bg=COLORS["bg_deep"])
+        grid_wrap.pack(padx=CELL_PAD, pady=CELL_PAD)
 
         for row in range(ROWS):
             row_labels: list[tk.Label] = []
             for col in range(COLS):
                 cell = tk.Label(
                     grid_wrap,
-                    text="?",
-                    width=4,
-                    height=2,
-                    font=("Segoe UI", 14, "bold"),
-                    bg=COLORS["hidden"],
-                    fg=COLORS["muted"],
-                    relief=tk.RAISED,
-                    bd=2,
-                    highlightthickness=0,
+                    text="·",
+                    width=3,
+                    height=1,
+                    font=FONTS["cell"],
+                    bg=COLORS["cell_hidden"],
+                    fg=COLORS["cell_hidden_fg"],
+                    relief=tk.FLAT,
+                    highlightthickness=2,
+                    highlightbackground=COLORS["bg_deep"],
                 )
-                cell.grid(row=row, column=col, padx=3, pady=3)
+                cell.grid(row=row, column=col, padx=CELL_GAP, pady=CELL_GAP, sticky="nsew")
                 row_labels.append(cell)
             self._cell_labels.append(row_labels)
 
-    def _build_output_panel(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Results", style="Panel.TLabelframe")
-        frame.pack(fill=tk.BOTH, expand=True)
+        legend = tk.Frame(inner, bg=COLORS["panel"])
+        legend.pack(fill=tk.X, pady=(14, 0))
+        for icon, label, color in (
+            ("💣", "Bomb", COLORS["cell_mine_border"]),
+            ("💎", "Safe", COLORS["cell_safe_border"]),
+        ):
+            item = tk.Frame(legend, bg=COLORS["panel"])
+            item.pack(side=tk.LEFT, padx=(0, 20))
+            tk.Label(item, text=icon, bg=COLORS["panel"], font=FONTS["body"]).pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(item, text=label, bg=COLORS["panel"], fg=color, font=FONTS["label"]).pack(side=tk.LEFT)
 
-        self.result_text = tk.Text(
-            frame,
-            height=10,
-            wrap=tk.WORD,
-            bg=COLORS["input_bg"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief=tk.FLAT,
-            font=("Segoe UI", 10),
+    def _build_output_panel(self, parent: tk.Frame) -> None:
+        card = ttk.LabelFrame(parent, text="  Results", style="Card.TLabelframe")
+        card.pack(fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(card, bg=COLORS["panel"])
+        inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        self.stat_mines = tk.Label(
+            inner,
+            text="—",
+            bg=COLORS["panel"],
+            fg=COLORS["accent"],
+            font=FONTS["stat_big"],
         )
-        self.result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self._set_result_text("Change seeds or mine count — grid updates automatically.")
+        self.stat_mines.pack(anchor=tk.W)
+
+        tk.Label(
+            inner,
+            text="mines detected",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=FONTS["label"],
+        ).pack(anchor=tk.W, pady=(0, 12))
+
+        tk.Frame(inner, bg=COLORS["border"], height=1).pack(fill=tk.X, pady=(0, 10))
+
+        self.result_bombs = tk.Label(
+            inner,
+            text="Bombs: —",
+            bg=COLORS["panel"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+            wraplength=LEFT_PANEL_WIDTH - 48,
+            justify=tk.LEFT,
+        )
+        self.result_bombs.pack(anchor=tk.W, pady=4)
+
+        self.result_safe = tk.Label(
+            inner,
+            text="Safe: —",
+            bg=COLORS["panel"],
+            fg=COLORS["text_secondary"],
+            font=FONTS["body"],
+        )
+        self.result_safe.pack(anchor=tk.W, pady=4)
 
     def _on_any_input(self, *_args) -> None:
         if self._suppress_auto:
@@ -306,22 +397,19 @@ class MinesPredictorApp:
             self._load_demo_seeds()
             self._set_seed_inputs_enabled(False)
             self.subtitle_label.configure(
-                text="Demo mode — grid updates when you change mine count."
+                text="Demo mode — change mine count to see the board update."
             )
-            self.demo_banner.configure(
-                text="  Demo: 3 mines → rows (4,3), (3,2), (4,4)  "
-            )
-            self.root.title("Mines Detector — Demo")
+            self.demo_banner.configure(text="Verified demo seeds · 3 mines at (4,4), (4,1), (2,1)")
+            self.demo_banner_frame.pack(fill=tk.X, pady=(12, 0))
+            self.root.title("Mines Detector")
             self._run_detect(show_popup=False)
             return
 
         self._set_seed_inputs_enabled(True)
         if self._saved_live_seeds.get("server") or self._saved_live_seeds.get("client"):
             self._restore_live_seeds()
-        self.subtitle_label.configure(
-            text="Paste your seeds — grid updates as you type."
-        )
-        self.demo_banner.configure(text="")
+        self.subtitle_label.configure(text="Paste your seeds — the board updates as you type.")
+        self.demo_banner_frame.pack_forget()
         self.root.title("Mines Detector")
 
         if self._has_valid_live_seeds():
@@ -350,10 +438,12 @@ class MinesPredictorApp:
 
     def _set_seed_inputs_enabled(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
+        bg = COLORS["input_bg"] if enabled else COLORS["input_disabled"]
+        fg = COLORS["text"] if enabled else COLORS["muted"]
         for entry in self._seed_entries:
-            entry.configure(state=state)
+            entry.configure(state=state, bg=bg, fg=fg)
         self.mine_spinbox.configure(state=tk.NORMAL)
-        self.verify_btn.configure(state=state)
+        self.verify_btn.state(["!disabled"] if enabled else ["disabled"])
 
     def _read_server(self) -> str:
         return self._get_entry_text(0, self.server_seed_var)
@@ -414,6 +504,68 @@ class MinesPredictorApp:
             game_round=0,
         )
 
+    def _show_waiting_state(self) -> None:
+        self._reset_grid()
+        self._set_status("Waiting for seeds", COLORS["muted"])
+        self.stat_mines.configure(text="—", fg=COLORS["muted"])
+        self.result_bombs.configure(text="Paste server + client seeds")
+        self.result_safe.configure(text="")
+
+    def _set_status(self, text: str, color: str) -> None:
+        self.status_label.configure(text=text, fg=color)
+
+    def _reset_grid(self) -> None:
+        for row in range(ROWS):
+            for col in range(COLS):
+                self._cell_labels[row][col].configure(
+                    text="·",
+                    bg=COLORS["cell_hidden"],
+                    fg=COLORS["cell_hidden_fg"],
+                    highlightbackground=COLORS["bg_deep"],
+                    highlightthickness=2,
+                )
+
+    def _run_detect(self, *, show_popup: bool) -> None:
+        self.root.update_idletasks()
+
+        if not self.demo_mode.get() and not self._has_valid_live_seeds():
+            if show_popup:
+                messagebox.showinfo("Need seeds", "Paste server seed and client seed first.")
+            else:
+                self._show_waiting_state()
+            return
+
+        try:
+            bundle = self._read_bundle()
+        except ValueError as exc:
+            self._set_status(str(exc), COLORS["danger"])
+            if show_popup:
+                messagebox.showerror("Can't detect", str(exc))
+            return
+
+        self._reset_grid()
+        self.root.update()
+
+        try:
+            result = self._detector.detect(bundle)
+        except ValueError as exc:
+            self._set_status(str(exc), COLORS["danger"])
+            if show_popup:
+                messagebox.showerror("Can't detect", str(exc))
+            return
+
+        self._render_grid(result)
+        self._write_result(result)
+        self._last_bundle_key = self._bundle_key(bundle)
+
+        if self.demo_mode.get():
+            ok, _ = run_demo_detection(bundle.mine_count)
+            color = COLORS["demo"] if ok else COLORS["danger"]
+        else:
+            color = COLORS["accent"]
+        self._set_status(f"{result.mine_count} mines on board", color)
+        self.root.update_idletasks()
+
     def _bundle_key(self, bundle: SeedBundle) -> tuple[str, str, int, int, bool]:
         return (
             bundle.server_seed,
@@ -423,72 +575,6 @@ class MinesPredictorApp:
             self.demo_mode.get(),
         )
 
-    def _show_waiting_state(self) -> None:
-        self._reset_grid()
-        self.status_label.configure(text="Waiting for seeds", fg=COLORS["muted"])
-        self._set_result_text("Paste server seed and client seed.\nGrid will update automatically.")
-
-    def _reset_grid(self) -> None:
-        for row in range(ROWS):
-            for col in range(COLS):
-                self._cell_labels[row][col].configure(
-                    text="?",
-                    bg=COLORS["hidden"],
-                    fg=COLORS["muted"],
-                    highlightthickness=0,
-                )
-
-    def _run_detect(self, *, show_popup: bool) -> None:
-        self.root.update_idletasks()
-
-        if not self.demo_mode.get() and not self._has_valid_live_seeds():
-            if show_popup:
-                messagebox.showinfo(
-                    "Need seeds",
-                    "Paste server seed and client seed first.",
-                )
-            else:
-                self._show_waiting_state()
-            return
-
-        try:
-            bundle = self._read_bundle()
-        except ValueError as exc:
-            self.status_label.configure(text=str(exc), fg=COLORS["danger"])
-            if show_popup:
-                messagebox.showerror("Can't detect", str(exc))
-            return
-
-        bundle_key = self._bundle_key(bundle)
-        self._reset_grid()
-        self.root.update()
-
-        try:
-            result = self._detector.detect(bundle)
-        except ValueError as exc:
-            self.status_label.configure(text=str(exc), fg=COLORS["danger"])
-            if show_popup:
-                messagebox.showerror("Can't detect", str(exc))
-            return
-
-        self._render_grid(result)
-        self._write_result(result)
-        self._last_bundle_key = bundle_key
-
-        if self.demo_mode.get():
-            ok, _msg = run_demo_detection(bundle.mine_count)
-            color = COLORS["demo"] if ok else COLORS["danger"]
-            self.status_label.configure(
-                text=f"{result.mine_count} mines shown",
-                fg=color,
-            )
-        else:
-            self.status_label.configure(
-                text=f"{result.mine_count} mines shown",
-                fg=COLORS["accent"],
-            )
-        self.root.update_idletasks()
-
     def _on_verify_hash(self) -> None:
         server_seed = self._read_server()
         expected = self.server_hash_var.get().strip()
@@ -497,9 +583,9 @@ class MinesPredictorApp:
             return
         computed = hash_server_seed(server_seed)
         if computed.lower() == expected.lower():
-            messagebox.showinfo("OK", "Hash matches.")
+            messagebox.showinfo("Verified", "Seed hash matches.")
         else:
-            messagebox.showerror("No match", f"Expected hash:\n{computed}")
+            messagebox.showerror("Mismatch", f"Expected:\n{computed}")
 
     def _render_grid(self, result: PredictionResult) -> None:
         mines = set(result.mine_tiles)
@@ -510,34 +596,25 @@ class MinesPredictorApp:
                 if tile in mines:
                     cell.configure(
                         text="💣",
-                        bg=COLORS["mine"],
+                        bg=COLORS["cell_mine_bg"],
                         fg=COLORS["danger"],
-                        highlightbackground=COLORS["mine_border"],
+                        highlightbackground=COLORS["cell_mine_border"],
                         highlightthickness=2,
                     )
                 else:
                     cell.configure(
                         text="💎",
-                        bg=COLORS["safe"],
+                        bg=COLORS["cell_safe_bg"],
                         fg=COLORS["accent"],
-                        highlightbackground=COLORS["safe_border"],
+                        highlightbackground=COLORS["cell_safe_border"],
                         highlightthickness=2,
                     )
 
-    def _set_result_text(self, text: str) -> None:
-        self.result_text.configure(state=tk.NORMAL)
-        self.result_text.delete("1.0", tk.END)
-        self.result_text.insert(tk.END, text)
-        self.result_text.configure(state=tk.DISABLED)
-
     def _write_result(self, result: PredictionResult) -> None:
         bombs = format_tile_list(result.mine_tiles)
-        self._set_result_text(
-            f"{result.mine_count} mine"
-            f"{'s' if result.mine_count != 1 else ''} found\n\n"
-            f"Bombs: {bombs}\n"
-            f"Safe squares: {len(result.safe_tiles)}"
-        )
+        self.stat_mines.configure(text=str(result.mine_count), fg=COLORS["accent"])
+        self.result_bombs.configure(text=f"Bombs: {bombs}")
+        self.result_safe.configure(text=f"Safe squares: {len(result.safe_tiles)}")
 
     def _on_close(self) -> None:
         if self._detect_after_id is not None:
