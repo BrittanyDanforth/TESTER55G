@@ -24,7 +24,7 @@ from mines_predictor.theme import (
 
 COLS = 5
 ROWS = 5
-AUTO_DETECT_MS = 200
+AUTO_DETECT_MS = 450
 
 
 class MinesPredictorApp:
@@ -48,7 +48,8 @@ class MinesPredictorApp:
         self.client_seed_var = tk.StringVar()
         self.server_hash_var = tk.StringVar()
         self.mine_count_var = tk.StringVar(value="3")
-        self.mine_count_var.trace_add("write", self._on_any_input)
+        self._detecting = False
+        self._last_rendered_mines: frozenset[int] | None = None
 
         configure_styles(self.root)
         self._build_layout()
@@ -246,20 +247,32 @@ class MinesPredictorApp:
         except ValueError:
             value = 3
         value = max(1, min(24, value + delta))
-        self.mine_count_var.set(str(value))
+        if str(value) != self.mine_count_var.get().strip():
+            self.mine_count_var.set(str(value))
+            self._schedule_auto_detect()
 
     def _on_mine_entry_key(self, _event=None) -> None:
+        if self._suppress_auto:
+            return
         raw = self.mine_count_var.get().strip()
         if not raw:
             return
         if not raw.isdigit():
             cleaned = "".join(ch for ch in raw if ch.isdigit())
-            self.mine_count_var.set(cleaned)
+            if cleaned != raw:
+                self._suppress_auto = True
+                self.mine_count_var.set(cleaned)
+                self._suppress_auto = False
             return
         value = int(raw)
         if value > 24:
+            self._suppress_auto = True
             self.mine_count_var.set("24")
-        self._on_any_input()
+            self._suppress_auto = False
+            value = 24
+        if value < 1:
+            return
+        self._schedule_auto_detect()
 
     def _field(
         self,
@@ -303,13 +316,9 @@ class MinesPredictorApp:
 
         def on_focus_out(_e: tk.Event, frame: tk.Frame = border) -> None:
             frame.configure(highlightbackground=COLORS["border"])
-            self._on_any_input()
 
         entry.bind("<FocusIn>", on_focus_in)
         entry.bind("<FocusOut>", on_focus_out)
-
-        if index < 2:
-            variable.trace_add("write", self._on_any_input)
         self._seed_entries.append(entry)
 
     def _build_grid_panel(self, parent: tk.Frame) -> None:
@@ -416,11 +425,22 @@ class MinesPredictorApp:
         self.result_safe.pack(anchor=tk.W, pady=4)
 
     def _on_any_input(self, *_args) -> None:
-        if self._suppress_auto:
+        if self._suppress_auto or self._detecting:
             return
         self._schedule_auto_detect()
 
+    def _peek_bundle_key(self) -> tuple[str, str, int, int, bool] | None:
+        try:
+            return self._bundle_key(self._read_bundle())
+        except ValueError:
+            return None
+
     def _schedule_auto_detect(self) -> None:
+        if self._suppress_auto or self._detecting:
+            return
+        key = self._peek_bundle_key()
+        if key is not None and key == self._last_bundle_key:
+            return
         if self._detect_after_id is not None:
             self.root.after_cancel(self._detect_after_id)
         self._detect_after_id = self.root.after(AUTO_DETECT_MS, self._auto_detect)
@@ -533,7 +553,10 @@ class MinesPredictorApp:
             raise ValueError("Mines must be a number from 1 to 24") from exc
         if count < 1 or count > 24:
             raise ValueError("Mines must be from 1 to 24")
-        self.mine_count_var.set(str(count))
+        if self.mine_count_var.get().strip() != str(count):
+            self._suppress_auto = True
+            self.mine_count_var.set(str(count))
+            self._suppress_auto = False
         return count
 
     def _read_bundle(self) -> SeedBundle:
@@ -569,6 +592,7 @@ class MinesPredictorApp:
         self.status_label.configure(text=text, fg=color)
 
     def _reset_grid(self) -> None:
+        self._last_rendered_mines = None
         for row in range(ROWS):
             for col in range(COLS):
                 self._cell_labels[row][col].configure(
@@ -580,45 +604,48 @@ class MinesPredictorApp:
                 )
 
     def _run_detect(self, *, show_popup: bool) -> None:
-        self.root.update_idletasks()
-
-        if not self.demo_mode.get() and not self._has_valid_live_seeds():
-            if show_popup:
-                messagebox.showinfo("Need seeds", "Paste server seed and client seed first.")
-            else:
-                self._show_waiting_state()
+        if self._detecting:
             return
+        self._detecting = True
+        if self._detect_after_id is not None:
+            self.root.after_cancel(self._detect_after_id)
+            self._detect_after_id = None
 
         try:
-            bundle = self._read_bundle()
-        except ValueError as exc:
-            self._set_status(str(exc), COLORS["danger"])
-            if show_popup:
-                messagebox.showerror("Can't detect", str(exc))
-            return
+            self.root.update_idletasks()
 
-        self._reset_grid()
-        self.root.update()
+            if not self.demo_mode.get() and not self._has_valid_live_seeds():
+                if show_popup:
+                    messagebox.showinfo("Need seeds", "Paste server seed and client seed first.")
+                else:
+                    self._show_waiting_state()
+                return
 
-        try:
+            try:
+                bundle = self._read_bundle()
+            except ValueError as exc:
+                self._set_status(str(exc), COLORS["danger"])
+                if show_popup:
+                    messagebox.showerror("Can't detect", str(exc))
+                return
+
+            bundle_key = self._bundle_key(bundle)
+            if bundle_key == self._last_bundle_key:
+                return
+
             result = self._detector.detect(bundle)
-        except ValueError as exc:
-            self._set_status(str(exc), COLORS["danger"])
-            if show_popup:
-                messagebox.showerror("Can't detect", str(exc))
-            return
+            self._render_grid(result)
+            self._write_result(result)
+            self._last_bundle_key = bundle_key
 
-        self._render_grid(result)
-        self._write_result(result)
-        self._last_bundle_key = self._bundle_key(bundle)
-
-        if self.demo_mode.get():
-            ok, _ = run_demo_detection(bundle.mine_count)
-            color = COLORS["demo"] if ok else COLORS["danger"]
-        else:
-            color = COLORS["accent"]
-        self._set_status(f"{result.mine_count} mines on board", color)
-        self.root.update_idletasks()
+            if self.demo_mode.get():
+                ok, _ = run_demo_detection(bundle.mine_count)
+                color = COLORS["demo"] if ok else COLORS["danger"]
+            else:
+                color = COLORS["accent"]
+            self._set_status(f"{result.mine_count} mines on board", color)
+        finally:
+            self._detecting = False
 
     def _bundle_key(self, bundle: SeedBundle) -> tuple[str, str, int, int, bool]:
         return (
@@ -642,7 +669,11 @@ class MinesPredictorApp:
             messagebox.showerror("Mismatch", f"Expected:\n{computed}")
 
     def _render_grid(self, result: PredictionResult) -> None:
-        mines = set(result.mine_tiles)
+        mines = frozenset(result.mine_tiles)
+        if mines == self._last_rendered_mines:
+            return
+        self._last_rendered_mines = mines
+
         for row in range(ROWS):
             for col in range(COLS):
                 tile = row * COLS + col
