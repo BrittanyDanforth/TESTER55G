@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minesweeper</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <h1>Minesweeper</h1>
+        <p class="phase-tag">Phase 1 — Core UI &amp; gameplay</p>
+      </header>
+
+      <main class="game-panel">
+        <div class="toolbar" role="toolbar" aria-label="Game controls">
+          <div class="counter" aria-live="polite">
+            <span class="counter-label">Mines</span>
+            <span id="mine-count" class="counter-value">010</span>
+          </div>
+
+          <button
+            id="reset-btn"
+            type="button"
+            class="reset-btn"
+            aria-label="New game"
+            title="New game"
+          >
+            <span id="face-icon" aria-hidden="true">🙂</span>
+          </button>
+
+          <div class="counter" aria-live="polite">
+            <span class="counter-label">Time</span>
+            <span id="timer" class="counter-value">000</span>
+          </div>
+        </div>
+
+        <div class="difficulty-row">
+          <fieldset class="difficulty" aria-label="Difficulty">
+            <legend class="sr-only">Difficulty</legend>
+            <label class="difficulty-option">
+              <input type="radio" name="difficulty" value="beginner" checked />
+              Beginner (9×9)
+            </label>
+            <label class="difficulty-option">
+              <input type="radio" name="difficulty" value="intermediate" />
+              Intermediate (16×16)
+            </label>
+            <label class="difficulty-option">
+              <input type="radio" name="difficulty" value="expert" />
+              Expert (16×30)
+            </label>
+          </fieldset>
+        </div>
+
+        <div
+          id="board"
+          class="board"
+          role="grid"
+          aria-label="Minesweeper board"
+        ></div>
+
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </main>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
