@@ -15,7 +15,7 @@ This is **not** classic Minesweeper. It matches games like **Stake Mines** where
 ## Requirements
 
 - Python 3.10+
-- Tkinter (included with most Python installs)
+- Tkinter (included with most Python installs; on Debian/Ubuntu: `sudo apt install python3-tk`)
 
 No pip packages required.
 
