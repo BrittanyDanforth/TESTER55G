@@ -44,3 +44,16 @@ StarterPlayer
 ```
 
 Hard landings deal damage and fade the screen to solid black (no text). On death the screen stays black until respawn.
+
+## Water touch → teleport to spawn1
+
+Put `WaterTeleport.client.lua` into:
+
+```
+StarterPlayer
+└─ StarterPlayerScripts
+   └─ WaterTeleport   ← LocalScript here
+```
+
+Touch `cliff > Water Blocks > water` for **15 seconds** → teleport to `cliff > spawn > spawn1`.
+Leave the water early and the timer cancels. On the `water` part, set **CanTouch = true**.
