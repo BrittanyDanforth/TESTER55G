@@ -45,7 +45,7 @@ StarterPlayer
 
 Hard landings deal damage and fade the screen to solid black (no text). On death the screen stays black until respawn.
 
-## Water touch → teleport to spawn1
+## Water swim + teleport to spawn1
 
 Put `WaterTeleport.client.lua` into:
 
@@ -55,5 +55,12 @@ StarterPlayer
    └─ WaterTeleport   ← LocalScript here
 ```
 
-Touch `cliff > Water Blocks > water` for **15 seconds** → teleport to `cliff > spawn > spawn1`.
-Leave the water early and the timer cancels. On the `water` part, set **CanTouch = true**.
+Makes every BasePart in `cliff > Water Blocks` swimmable (buoyancy + swim state).
+Stay in water **15 seconds** → teleport to `cliff > spawn > spawn1`.
+
+Part settings (script applies these):
+- **CanCollide = false** (required — if true you stand on top / fall weird)
+- **CanTouch = true**
+- **Anchored = true**
+
+Roblox only auto-swims in Terrain water; Part water needs this script.
